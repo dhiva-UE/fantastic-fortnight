@@ -180,7 +180,9 @@ def build_public_file_url(file_path: str | None) -> str | None:
         invoice_relative = resolved.relative_to(PURCHASE_INVOICES_DIR)
         return f"/media/purchase-invoices/{invoice_relative.as_posix()}"
     except ValueError:
-        return None
+        pass
+
+    return None
 
 
 def build_dashboard_response() -> DashboardResponse:

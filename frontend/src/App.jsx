@@ -33,38 +33,17 @@ import {
   updateSupplier,
   updateUser
 } from "./api";
+import inboundOfficialLogo from "./assets/inbound-official-logo.png";
 
 function AnimatedLogo({ compact = false }) {
-  const letters = ["I", "n", "b", "o", "u", "n", "d"];
-
   return (
     <div className={`brand-lockup ${compact ? "compact" : ""}`} role="img" aria-label="Inbound animated logo">
       <div className="brand-logo-stage" aria-hidden="true">
-        <div className="brand-logo-word">
-          {letters.map((letter, index) => (
-            <span
-              key={`${letter}-${index}`}
-              className="brand-letter"
-              style={{ "--brand-letter-index": index }}
-            >
-              {letter}
-            </span>
-          ))}
+        <div className="brand-logo-text">
+          <img src={inboundOfficialLogo} alt="" />
         </div>
         <div className="brand-logo-swoosh">
-          <svg viewBox="0 0 320 72" preserveAspectRatio="none">
-            <path
-              className="brand-swoosh-glow"
-              d="M64 47C116 50 178 47 236 38C263 34 288 27 307 17"
-              pathLength="100"
-            />
-            <path
-              className="brand-swoosh-line"
-              d="M64 47C116 50 178 47 236 38C263 34 288 27 307 17"
-              pathLength="100"
-            />
-            <circle className="brand-swoosh-spark" cx="64" cy="47" r="2.8" />
-          </svg>
+          <img src={inboundOfficialLogo} alt="" />
         </div>
       </div>
     </div>
@@ -80,11 +59,97 @@ function MetricCard({ label, value }) {
   );
 }
 
+function getCellDisplayValue(value) {
+  if (value === null || value === undefined || value === "") {
+    return "-";
+  }
+
+  return String(value);
+}
+
+function escapeCsvValue(value) {
+  const normalized = String(value ?? "").replace(/"/g, "\"\"");
+  return `"${normalized}"`;
+}
+
 function DataCard({ title, columns, rows }) {
+  const [filterColumn, setFilterColumn] = useState("all");
+  const [filterValue, setFilterValue] = useState("");
+
+  const filteredRows = useMemo(() => {
+    const normalizedFilter = filterValue.trim().toLowerCase();
+
+    if (!normalizedFilter) {
+      return rows;
+    }
+
+    return rows.filter((row) => {
+      const valuesToSearch = filterColumn === "all"
+        ? columns.map((column) => row[column.key])
+        : [row[filterColumn]];
+
+      return valuesToSearch.some((value) => getCellDisplayValue(value).toLowerCase().includes(normalizedFilter));
+    });
+  }, [columns, filterColumn, filterValue, rows]);
+
+  const downloadCsv = () => {
+    if (filteredRows.length === 0) {
+      return;
+    }
+
+    const headerRow = columns.map((column) => escapeCsvValue(column.label)).join(",");
+    const dataRows = filteredRows.map((row) => (
+      columns.map((column) => escapeCsvValue(getCellDisplayValue(row[column.key]))).join(",")
+    ));
+    const csvContent = [headerRow, ...dataRows].join("\n");
+    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    const fileName = `${title.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "report"}.csv`;
+
+    link.href = url;
+    link.download = fileName;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  };
+
   return (
     <section className="panel">
-      <div className="panel-header">
-        <h3>{title}</h3>
+      <div className="panel-header split-header">
+        <div>
+          <h3>{title}</h3>
+          <p className="panel-copy">Filter visible rows and export the current report as CSV.</p>
+        </div>
+        <button className="ghost-button slim report-download-button" type="button" onClick={downloadCsv} disabled={filteredRows.length === 0}>
+          Download CSV
+        </button>
+      </div>
+      <div className="report-toolbar">
+        <div className="report-filter-row">
+          <label className="report-filter-field">
+            Filter By
+            <select value={filterColumn} onChange={(event) => setFilterColumn(event.target.value)}>
+              <option value="all">All Columns</option>
+              {columns.map((column) => (
+                <option key={column.key} value={column.key}>{column.label}</option>
+              ))}
+            </select>
+          </label>
+          <label className="report-filter-field report-filter-search">
+            Search
+            <input
+              type="text"
+              value={filterValue}
+              onChange={(event) => setFilterValue(event.target.value)}
+              placeholder="Type to filter rows"
+            />
+          </label>
+        </div>
+        <p className="report-filter-meta">
+          Showing {filteredRows.length} of {rows.length} rows
+        </p>
       </div>
       <div className="table-shell">
         <table>
@@ -96,17 +161,17 @@ function DataCard({ title, columns, rows }) {
             </tr>
           </thead>
           <tbody>
-            {rows.length === 0 ? (
+            {filteredRows.length === 0 ? (
               <tr>
                 <td colSpan={columns.length} className="empty-state-cell">
-                  No records available
+                  {rows.length === 0 ? "No records available" : "No matching records found"}
                 </td>
               </tr>
             ) : (
-              rows.map((row, index) => (
+              filteredRows.map((row, index) => (
                 <tr key={index}>
                   {columns.map((column) => (
-                    <td key={column.key}>{row[column.key] || "-"}</td>
+                    <td key={column.key}>{getCellDisplayValue(row[column.key])}</td>
                   ))}
                 </tr>
               ))
@@ -355,7 +420,7 @@ function ComponentForm({ suppliers, employees, selectedComponent, onSubmit, savi
           </div>
         ) : null}
         <div className="full-span form-actions">
-          <button type="submit" disabled={saving}>
+          <button className="form-submit-button" type="submit" disabled={saving}>
             {saving ? "Saving..." : selectedComponent ? "Update Component" : "Create Component"}
           </button>
         </div>
@@ -598,7 +663,7 @@ function PurchaseForm({ products, suppliers, selectedPurchase, onSubmit, saving,
           </div>
         ) : null}
         <div className="full-span form-actions">
-          <button type="submit" disabled={saving}>{saving ? "Saving..." : selectedPurchase ? "Update Purchase" : "Create Purchase"}</button>
+          <button className="form-submit-button" type="submit" disabled={saving}>{saving ? "Saving..." : selectedPurchase ? "Update Purchase" : "Create Purchase"}</button>
         </div>
       </form>
     </section>
@@ -799,7 +864,7 @@ function SaleForm({ products, selectedSale, onSubmit, saving, onCancel }) {
           <input value={formatCurrency(totalValue)} disabled />
         </label>
         <div className="full-span form-actions">
-          <button type="submit" disabled={saving}>{saving ? "Saving..." : selectedSale ? "Update Sale" : "Create Sale"}</button>
+          <button className="form-submit-button" type="submit" disabled={saving}>{saving ? "Saving..." : selectedSale ? "Update Sale" : "Create Sale"}</button>
         </div>
       </form>
     </section>
@@ -991,7 +1056,7 @@ function NoteForm({ employees, selectedNote, currentUser, onSubmit, saving, onCa
           />
         </label>
         <div className="full-span form-actions">
-          <button type="submit" disabled={saving}>{saving ? "Saving..." : selectedNote ? "Update Note" : "Create Note"}</button>
+          <button className="form-submit-button" type="submit" disabled={saving}>{saving ? "Saving..." : selectedNote ? "Update Note" : "Create Note"}</button>
         </div>
       </form>
     </section>
@@ -1164,7 +1229,9 @@ function SupplierForm({ selectedSupplier, onSubmit, saving, onCancel }) {
           <textarea className="notes-textarea" value={formState.address} onChange={(event) => handleChange("address", event.target.value)} />
         </label>
         <div className="full-span form-actions">
-          <button type="submit" disabled={saving}>{saving ? "Saving..." : selectedSupplier ? "Update Supplier" : "Create Supplier"}</button>
+          <button className="form-submit-button" type="submit" disabled={saving}>
+            {saving ? "Saving..." : selectedSupplier ? "Update Supplier" : "Create Supplier"}
+          </button>
         </div>
       </form>
     </section>
@@ -1363,7 +1430,7 @@ function UserForm({ selectedUser, onSubmit, saving, onCancel }) {
         <PermissionSelect label="Can Edit Purchases" value={formState.can_edit_purchases} onChange={(value) => handleChange("can_edit_purchases", value)} />
         <PermissionSelect label="Can Delete Purchases" value={formState.can_delete_purchases} onChange={(value) => handleChange("can_delete_purchases", value)} />
         <div className="full-span form-actions">
-          <button type="submit" disabled={saving}>{saving ? "Saving..." : selectedUser ? "Update User" : "Create User"}</button>
+          <button className="form-submit-button" type="submit" disabled={saving}>{saving ? "Saving..." : selectedUser ? "Update User" : "Create User"}</button>
         </div>
       </form>
     </section>
@@ -1574,7 +1641,7 @@ function AssignmentsView({ assignmentsPayload, onRefresh }) {
             <textarea className="notes-textarea" value={formState.remarks} onChange={(event) => handleChange("remarks", event.target.value)} />
           </label>
           <div className="full-span form-actions">
-            <button type="submit" disabled={saving}>{saving ? "Saving..." : "Update Responsibility"}</button>
+            <button className="form-submit-button" type="submit" disabled={saving}>{saving ? "Saving..." : "Update Responsibility"}</button>
           </div>
         </form>
       </section>
@@ -1942,9 +2009,6 @@ export default function App() {
         <div>
           <AnimatedLogo compact />
           <h2>Inventory OS</h2>
-          <p className="sidebar-copy">
-            React migration preview with live FastAPI modules backed by PostgreSQL.
-          </p>
         </div>
         <nav className="nav-list">
           <button className={`nav-item ${activeView === "dashboard" ? "active" : ""}`} onClick={() => setActiveView("dashboard")}>Dashboard</button>
