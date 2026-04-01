@@ -206,12 +206,18 @@ def create_tables():
 
         ensure_column_exists(cursor, "product_assignments", "status", "TEXT DEFAULT 'In Progress'")
         ensure_column_exists(cursor, "users", "department", "TEXT")
+        ensure_column_exists(cursor, "users", "date_of_joining", "TEXT")
+        ensure_column_exists(cursor, "users", "office_email", "TEXT")
+        ensure_column_exists(cursor, "users", "company_email", "TEXT")
+        ensure_column_exists(cursor, "users", "contact_number", "TEXT")
         ensure_column_exists(cursor, "users", "can_edit_suppliers", "INTEGER DEFAULT 0")
         ensure_column_exists(cursor, "users", "can_delete_suppliers", "INTEGER DEFAULT 0")
         ensure_column_exists(cursor, "users", "can_edit_products", "INTEGER DEFAULT 0")
         ensure_column_exists(cursor, "users", "can_delete_products", "INTEGER DEFAULT 0")
         ensure_column_exists(cursor, "users", "can_edit_purchases", "INTEGER DEFAULT 0")
         ensure_column_exists(cursor, "users", "can_delete_purchases", "INTEGER DEFAULT 0")
+        ensure_column_exists(cursor, "notes", "assigned_to", "TEXT")
+        ensure_column_exists(cursor, "products", "is_active", "INTEGER DEFAULT 1")
 
         conn.commit()
     except Exception:
@@ -246,6 +252,7 @@ def create_tables_sqlite(cursor):
             supplier_id INTEGER,
             image_path TEXT,
             assigned_to TEXT,
+            is_active INTEGER DEFAULT 1,
             FOREIGN KEY (supplier_id) REFERENCES suppliers(supplier_id)
         )
     """)
@@ -297,6 +304,10 @@ def create_tables_sqlite(cursor):
             password TEXT NOT NULL,
             role TEXT NOT NULL,
             department TEXT,
+            date_of_joining TEXT,
+            office_email TEXT,
+            company_email TEXT,
+            contact_number TEXT,
             can_edit_suppliers INTEGER DEFAULT 0,
             can_delete_suppliers INTEGER DEFAULT 0,
             can_edit_products INTEGER DEFAULT 0,
@@ -313,7 +324,8 @@ def create_tables_sqlite(cursor):
             note_content TEXT NOT NULL,
             created_by TEXT,
             created_date TEXT,
-            note_status TEXT DEFAULT 'Open'
+            note_status TEXT DEFAULT 'Open',
+            assigned_to TEXT
         )
     """)
 
@@ -340,7 +352,8 @@ def create_tables_postgresql(cursor):
             reorder_level INTEGER DEFAULT 5,
             supplier_id INTEGER REFERENCES suppliers(supplier_id),
             image_path TEXT,
-            assigned_to TEXT
+            assigned_to TEXT,
+            is_active INTEGER DEFAULT 1
         )
     """)
 
@@ -387,6 +400,10 @@ def create_tables_postgresql(cursor):
             password TEXT NOT NULL,
             role TEXT NOT NULL,
             department TEXT,
+            date_of_joining TEXT,
+            office_email TEXT,
+            company_email TEXT,
+            contact_number TEXT,
             can_edit_suppliers INTEGER DEFAULT 0,
             can_delete_suppliers INTEGER DEFAULT 0,
             can_edit_products INTEGER DEFAULT 0,
@@ -403,7 +420,8 @@ def create_tables_postgresql(cursor):
             note_content TEXT NOT NULL,
             created_by TEXT,
             created_date TEXT,
-            note_status TEXT DEFAULT 'Open'
+            note_status TEXT DEFAULT 'Open',
+            assigned_to TEXT
         )
     """)
 
@@ -459,6 +477,14 @@ def get_suppliers():
     return read_dataframe("SELECT * FROM suppliers ORDER BY supplier_id DESC")
 
 
+def get_supplier_dropdown():
+    return read_dataframe("""
+        SELECT supplier_id, supplier_name
+        FROM suppliers
+        ORDER BY supplier_name
+    """)
+
+
 def update_supplier(supplier_id, name, contact, email, address):
     supplier_name = require_text(name, "Supplier name")
     execute(
@@ -491,9 +517,9 @@ def add_product(product_no, name, category, price, reorder_level, supplier_id, i
         cursor.execute(
             adapt_query("""
                 INSERT INTO products (
-                    product_no, product_name, category, price, reorder_level, supplier_id, image_path, assigned_to
+                    product_no, product_name, category, price, reorder_level, supplier_id, image_path, assigned_to, is_active
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """),
             (
                 product_no,
@@ -504,6 +530,7 @@ def add_product(product_no, name, category, price, reorder_level, supplier_id, i
                 supplier_id,
                 normalized_image_path,
                 normalized_assigned_to,
+                1,
             ),
         )
 
@@ -534,9 +561,10 @@ def get_products():
     return read_dataframe("""
         SELECT p.product_id, p.product_no, p.product_name, p.category, p.price,
                p.quantity, p.reorder_level, p.supplier_id, p.image_path,
-               p.assigned_to, s.supplier_name
+               p.assigned_to, p.is_active, s.supplier_name
         FROM products p
         LEFT JOIN suppliers s ON p.supplier_id = s.supplier_id
+        WHERE p.is_active = 1
         ORDER BY p.product_id DESC
     """)
 
@@ -545,14 +573,37 @@ def get_product_dropdown():
     return read_dataframe("""
         SELECT product_id, product_no, product_name, price, assigned_to
         FROM products
+        WHERE is_active = 1
         ORDER BY product_name
     """)
 
 
-def update_product(product_id, name, category, price, reorder_level, supplier_id, assigned_to):
+def update_product(product_id, name, category, price, reorder_level, supplier_id, assigned_to, image_path=None):
     product_name = require_text(name, "Product name")
     validated_price = require_non_negative_number(price, "Price")
     validated_reorder_level = require_positive_int(reorder_level, "Reorder level")
+    normalized_image_path = normalize_text(image_path) if image_path is not None else None
+
+    if image_path is not None:
+        execute(
+            """
+            UPDATE products
+            SET product_name = ?, category = ?, price = ?, reorder_level = ?, supplier_id = ?, assigned_to = ?, image_path = ?
+            WHERE product_id = ?
+            """,
+            (
+                product_name,
+                normalize_text(category),
+                validated_price,
+                validated_reorder_level,
+                supplier_id,
+                normalize_text(assigned_to),
+                normalized_image_path,
+                product_id,
+            ),
+        )
+        return
+
     execute(
         """
         UPDATE products
@@ -572,7 +623,7 @@ def update_product(product_id, name, category, price, reorder_level, supplier_id
 
 
 def delete_product(product_id):
-    execute("DELETE FROM products WHERE product_id = ?", (product_id,))
+    execute("UPDATE products SET is_active = 0 WHERE product_id = ?", (product_id,))
 
 
 # ---------------- PRODUCT ASSIGNMENTS ----------------
@@ -653,7 +704,8 @@ def add_purchase(product_id, supplier_id, quantity, unit_price, total_purchase_p
 
 def get_purchases():
     return read_dataframe("""
-        SELECT pu.purchase_id, p.product_no, p.product_name, s.supplier_name,
+        SELECT pu.purchase_id, pu.product_id, pu.supplier_id,
+               p.product_no, p.product_name, s.supplier_name,
                pu.quantity_purchased, pu.unit_price, pu.total_purchase_price,
                pu.purchase_date, pu.invoice_path
         FROM purchases pu
@@ -663,7 +715,7 @@ def get_purchases():
     """)
 
 
-def update_purchase(purchase_id, quantity, purchase_date):
+def update_purchase(purchase_id, quantity, supplier_id, purchase_date, invoice_path):
     quantity = require_positive_int(quantity, "Quantity")
     conn = get_connection()
     try:
@@ -693,10 +745,10 @@ def update_purchase(purchase_id, quantity, purchase_date):
             cursor.execute(
                 adapt_query("""
                     UPDATE purchases
-                    SET quantity_purchased = ?, total_purchase_price = unit_price * ?, purchase_date = ?
+                    SET quantity_purchased = ?, supplier_id = ?, total_purchase_price = unit_price * ?, purchase_date = ?, invoice_path = ?
                     WHERE purchase_id = ?
                 """),
-                (quantity, quantity, purchase_date, purchase_id),
+                (quantity, supplier_id, quantity, purchase_date, normalize_text(invoice_path), purchase_id),
             )
 
             cursor.execute(
@@ -797,7 +849,8 @@ def add_sale(product_id, quantity_sold, selling_price, sale_date, customer_name)
 
 def get_sales():
     return read_dataframe("""
-        SELECT s.sale_id, p.product_no, p.product_name, s.quantity_sold, s.selling_price,
+        SELECT s.sale_id, s.product_id, p.product_no, p.product_name,
+               s.quantity_sold, s.selling_price,
                s.sale_date, s.customer_name,
                (s.quantity_sold * s.selling_price) AS total_sales_value
         FROM sales s
@@ -929,20 +982,23 @@ def create_default_admin():
         """
         INSERT INTO users (
             full_name, username, password, role, department,
+            date_of_joining, office_email, company_email, contact_number,
             can_edit_suppliers, can_delete_suppliers,
             can_edit_products, can_delete_products,
             can_edit_purchases, can_delete_purchases
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             "System Administrator", "admin", hash_password("admin123"), "Admin", "Administration",
+            "", "", "", "",
             1, 1, 1, 1, 1, 1,
         ),
     )
 
 
 def add_user(full_name, username, password, role, department,
+             date_of_joining, office_email, company_email, contact_number,
              can_edit_suppliers, can_delete_suppliers,
              can_edit_products, can_delete_products,
              can_edit_purchases, can_delete_purchases):
@@ -955,14 +1011,17 @@ def add_user(full_name, username, password, role, department,
             """
             INSERT INTO users (
                 full_name, username, password, role, department,
+                date_of_joining, office_email, company_email, contact_number,
                 can_edit_suppliers, can_delete_suppliers,
                 can_edit_products, can_delete_products,
                 can_edit_purchases, can_delete_purchases
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 full_name, username, hash_password(password), role, normalize_text(department),
+                normalize_text(date_of_joining), normalize_text(office_email),
+                normalize_text(company_email), normalize_text(contact_number),
                 can_edit_suppliers, can_delete_suppliers,
                 can_edit_products, can_delete_products,
                 can_edit_purchases, can_delete_purchases,
@@ -978,6 +1037,7 @@ def add_user(full_name, username, password, role, department,
 def get_users():
     return read_dataframe("""
         SELECT user_id, full_name, username, role, department,
+               date_of_joining, office_email, company_email, contact_number,
                can_edit_suppliers, can_delete_suppliers,
                can_edit_products, can_delete_products,
                can_edit_purchases, can_delete_purchases
@@ -986,7 +1046,16 @@ def get_users():
     """)
 
 
+def get_user_dropdown():
+    return read_dataframe("""
+        SELECT user_id, full_name, username, role
+        FROM users
+        ORDER BY full_name
+    """)
+
+
 def update_user(user_id, full_name, username, password, role, department,
+                date_of_joining, office_email, company_email, contact_number,
                 can_edit_suppliers, can_delete_suppliers,
                 can_edit_products, can_delete_products,
                 can_edit_purchases, can_delete_purchases):
@@ -1001,6 +1070,7 @@ def update_user(user_id, full_name, username, password, role, department,
             """
             UPDATE users
             SET full_name = ?, username = ?, password = ?, role = ?, department = ?,
+                date_of_joining = ?, office_email = ?, company_email = ?, contact_number = ?,
                 can_edit_suppliers = ?, can_delete_suppliers = ?,
                 can_edit_products = ?, can_delete_products = ?,
                 can_edit_purchases = ?, can_delete_purchases = ?
@@ -1008,6 +1078,8 @@ def update_user(user_id, full_name, username, password, role, department,
             """,
             (
                 full_name, username, hashed_password, role, department,
+                normalize_text(date_of_joining), normalize_text(office_email),
+                normalize_text(company_email), normalize_text(contact_number),
                 can_edit_suppliers, can_delete_suppliers,
                 can_edit_products, can_delete_products,
                 can_edit_purchases, can_delete_purchases,
@@ -1019,6 +1091,7 @@ def update_user(user_id, full_name, username, password, role, department,
             """
             UPDATE users
             SET full_name = ?, username = ?, role = ?, department = ?,
+                date_of_joining = ?, office_email = ?, company_email = ?, contact_number = ?,
                 can_edit_suppliers = ?, can_delete_suppliers = ?,
                 can_edit_products = ?, can_delete_products = ?,
                 can_edit_purchases = ?, can_delete_purchases = ?
@@ -1026,6 +1099,8 @@ def update_user(user_id, full_name, username, password, role, department,
             """,
             (
                 full_name, username, role, department,
+                normalize_text(date_of_joining), normalize_text(office_email),
+                normalize_text(company_email), normalize_text(contact_number),
                 can_edit_suppliers, can_delete_suppliers,
                 can_edit_products, can_delete_products,
                 can_edit_purchases, can_delete_purchases,
@@ -1084,15 +1159,22 @@ def delete_user(user_id):
 
 
 # ---------------- NOTES ----------------
-def add_note(note_title, note_content, created_by, created_date, note_status="Open"):
+def add_note(note_title, note_content, created_by, created_date, note_status="Open", assigned_to=""):
     note_title = require_text(note_title, "Note title")
     note_content = require_text(note_content, "Note content")
     execute(
         """
-        INSERT INTO notes (note_title, note_content, created_by, created_date, note_status)
-        VALUES (?, ?, ?, ?, ?)
+        INSERT INTO notes (note_title, note_content, created_by, created_date, note_status, assigned_to)
+        VALUES (?, ?, ?, ?, ?, ?)
         """,
-        (note_title, note_content, normalize_text(created_by), created_date, require_text(note_status, "Note status")),
+        (
+            note_title,
+            note_content,
+            normalize_text(created_by),
+            created_date,
+            require_text(note_status, "Note status"),
+            normalize_text(assigned_to),
+        ),
     )
 
 
@@ -1104,16 +1186,16 @@ def get_notes():
     """)
 
 
-def update_note(note_id, note_title, note_content, note_status):
+def update_note(note_id, note_title, note_content, note_status, assigned_to=""):
     note_title = require_text(note_title, "Note title")
     note_content = require_text(note_content, "Note content")
     execute(
         """
         UPDATE notes
-        SET note_title = ?, note_content = ?, note_status = ?
+        SET note_title = ?, note_content = ?, note_status = ?, assigned_to = ?
         WHERE note_id = ?
         """,
-        (note_title, note_content, require_text(note_status, "Note status"), note_id),
+        (note_title, note_content, require_text(note_status, "Note status"), normalize_text(assigned_to), note_id),
     )
 
 

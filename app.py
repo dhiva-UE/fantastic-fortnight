@@ -1,5 +1,7 @@
 import streamlit as st
+import streamlit.components.v1 as components
 import pandas as pd
+import plotly.express as px
 import os
 from datetime import date
 from pathlib import Path
@@ -13,12 +15,206 @@ from database import (
     add_purchase, get_purchases, delete_purchase, update_purchase,
     add_sale, get_sales, delete_sale, update_sale,
     get_low_stock,
-    add_user, get_users, login_user, delete_user, update_user,
+    add_user, get_users, get_user_dropdown, login_user, delete_user, update_user,
     add_note, get_notes, update_note, delete_note
 )
 
+
+def apply_company_theme():
+    st.markdown(
+        """
+        <style>
+        :root {
+            --ia-bg: #eef4f8;
+            --ia-surface: rgba(255, 255, 255, 0.92);
+            --ia-surface-strong: #ffffff;
+            --ia-ink: #10212f;
+            --ia-muted: #587084;
+            --ia-line: rgba(16, 33, 47, 0.10);
+            --ia-brand: #0d2740;
+            --ia-brand-soft: #123a5c;
+            --ia-accent: #1fa2ff;
+            --ia-accent-soft: rgba(31, 162, 255, 0.12);
+            --ia-success: #138a5a;
+            --ia-warn: #b36b00;
+            --ia-danger: #b42318;
+            --ia-shadow: 0 18px 45px rgba(13, 39, 64, 0.10);
+            --ia-radius-lg: 24px;
+            --ia-radius-md: 18px;
+        }
+
+        .stApp {
+            background:
+                radial-gradient(circle at top right, rgba(31, 162, 255, 0.14), transparent 24%),
+                linear-gradient(180deg, #f8fbfd 0%, var(--ia-bg) 100%);
+            color: var(--ia-ink);
+        }
+
+        [data-testid="stAppViewContainer"] > .main {
+            background: transparent;
+        }
+
+        [data-testid="stSidebar"] {
+            background:
+                linear-gradient(180deg, rgba(13, 39, 64, 0.98) 0%, rgba(9, 28, 46, 0.98) 100%);
+            border-right: 1px solid rgba(255, 255, 255, 0.08);
+        }
+
+        [data-testid="stSidebar"] * {
+            color: #f5fbff !important;
+        }
+
+        [data-testid="stSidebar"] .stSelectbox label,
+        [data-testid="stSidebar"] .stButton label,
+        [data-testid="stSidebar"] .stRadio label {
+            color: #d7e6f5 !important;
+        }
+
+        [data-testid="stSidebar"] .stSelectbox > div > div,
+        [data-testid="stSidebar"] .stTextInput > div > div > input {
+            background: rgba(255, 255, 255, 0.08) !important;
+            border: 1px solid rgba(255, 255, 255, 0.12) !important;
+            border-radius: 14px !important;
+        }
+
+        .block-container {
+            padding-top: 1.4rem;
+            padding-bottom: 3rem;
+            max-width: 1480px;
+        }
+
+        div[data-testid="stVerticalBlock"] div[data-testid="stVerticalBlockBorderWrapper"],
+        div[data-testid="stForm"],
+        div[data-testid="metric-container"] {
+            background: var(--ia-surface);
+            border: 1px solid var(--ia-line);
+            border-radius: var(--ia-radius-md);
+            box-shadow: var(--ia-shadow);
+            backdrop-filter: blur(12px);
+        }
+
+        div[data-testid="metric-container"] {
+            padding: 0.9rem 1rem;
+        }
+
+        .ia-hero {
+            position: relative;
+            overflow: hidden;
+            padding: 2rem 2.2rem;
+            border-radius: 28px;
+            background:
+                linear-gradient(135deg, rgba(8, 27, 43, 0.98) 0%, rgba(15, 52, 81, 0.98) 58%, rgba(31, 162, 255, 0.9) 100%);
+            box-shadow: 0 28px 54px rgba(13, 39, 64, 0.22);
+            color: #f8fbfd;
+            margin-bottom: 1.2rem;
+        }
+
+        .ia-hero::after {
+            content: "";
+            position: absolute;
+            inset: auto -10% -30% auto;
+            width: 320px;
+            height: 320px;
+            border-radius: 50%;
+            background: radial-gradient(circle, rgba(255,255,255,0.18) 0%, rgba(255,255,255,0) 68%);
+        }
+
+        .ia-kicker {
+            font-size: 0.78rem;
+            letter-spacing: 0.18em;
+            text-transform: uppercase;
+            font-weight: 700;
+            color: rgba(255,255,255,0.72);
+            margin-bottom: 0.5rem;
+        }
+
+        .ia-title {
+            font-size: 2.25rem;
+            line-height: 1.05;
+            font-weight: 800;
+            margin: 0 0 0.45rem 0;
+        }
+
+        .ia-subtitle {
+            font-size: 1rem;
+            line-height: 1.6;
+            color: rgba(245, 251, 255, 0.78);
+            max-width: 900px;
+            margin: 0;
+        }
+
+        h1, h2, h3 {
+            color: var(--ia-brand);
+            letter-spacing: -0.02em;
+        }
+
+        .stButton > button,
+        .stDownloadButton > button,
+        .stFormSubmitButton > button {
+            border-radius: 999px !important;
+            border: 1px solid transparent !important;
+            background: linear-gradient(135deg, var(--ia-brand) 0%, var(--ia-brand-soft) 100%) !important;
+            color: white !important;
+            font-weight: 700 !important;
+            box-shadow: 0 14px 26px rgba(13, 39, 64, 0.22);
+            padding-left: 1rem !important;
+            padding-right: 1rem !important;
+        }
+
+        .stButton > button:hover,
+        .stDownloadButton > button:hover,
+        .stFormSubmitButton > button:hover {
+            transform: translateY(-1px);
+            border-color: rgba(31, 162, 255, 0.4) !important;
+            background: linear-gradient(135deg, var(--ia-brand-soft) 0%, #19517e 100%) !important;
+        }
+
+        .stAlert {
+            border-radius: 18px;
+            border: 1px solid var(--ia-line);
+        }
+
+        .stDataFrame,
+        div[data-testid="stTable"] {
+            border-radius: var(--ia-radius-md);
+            overflow: hidden;
+            border: 1px solid var(--ia-line);
+        }
+
+        [data-testid="stToolbar"] {
+            right: 1rem;
+        }
+
+        .ia-section-note {
+            color: var(--ia-muted);
+            font-size: 0.95rem;
+            margin-top: -0.35rem;
+            margin-bottom: 0.9rem;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def render_brand_header():
+    st.markdown(
+        """
+        <div class="ia-hero">
+            <div class="ia-kicker">Inbound Aerospace</div>
+            <div class="ia-title">Inbound Inventory Control Center</div>
+            <p class="ia-subtitle">
+                Aerospace-themed operations workspace for components, purchasing, sales, responsibility tracking,
+                reporting, and internal coordination.
+            </p>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
 # ---------------- PAGE CONFIG ----------------
 st.set_page_config(page_title="Inventory Management Software", layout="wide")
+# apply_company_theme()  # removed: revert to Streamlit default styling
 create_tables()
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -47,8 +243,7 @@ def save_uploaded_file(uploaded_file, target_dir, filename):
 PRODUCT_IMAGES_DIR = get_storage_dir("PRODUCT_IMAGES_DIR", "product_images")
 PURCHASE_INVOICES_DIR = get_storage_dir("PURCHASE_INVOICES_DIR", "purchase_invoices")
 
-st.title("📦 Inventory Management Software")
-st.markdown("### Manage Products, Suppliers, Purchases, Sales, Assignments, Notes & Reports")
+# render_brand_header()  # removed: revert to Streamlit default header styling
 
 # ---------------- SESSION ----------------
 if "logged_in" not in st.session_state:
@@ -104,6 +299,44 @@ def run_action(action, success_message):
         st.error(str(error))
     except Exception as error:
         st.error(f"Operation failed: {error}")
+
+
+def mark_menu_changed():
+    st.session_state.scroll_to_top = True
+
+
+def render_scroll_to_top():
+    components.html(
+        """
+        <script>
+        requestAnimationFrame(() => {
+          const parentDoc = window.parent.document;
+          const selectors = [
+            'section.main',
+            '[data-testid="stAppViewContainer"]',
+            '.main',
+            'body'
+          ];
+          selectors.forEach((selector) => {
+            parentDoc.querySelectorAll(selector).forEach((el) => {
+              if (el) {
+                el.scrollTo(0, 0);
+                el.scrollTop = 0;
+              }
+            });
+          });
+          if (parentDoc.documentElement) {
+            parentDoc.documentElement.scrollTop = 0;
+          }
+          if (parentDoc.body) {
+            parentDoc.body.scrollTop = 0;
+          }
+          window.parent.scrollTo(0, 0);
+        });
+        </script>
+        """,
+        height=0,
+    )
 
 # ---------------- SHOW FLASH ----------------
 if st.session_state.flash_message:
@@ -173,11 +406,18 @@ if st.sidebar.button("🚪 Logout"):
     st.rerun()
 
 if st.session_state.user_role == "Admin":
-    menu_options = ["Dashboard", "Users", "Suppliers", "Products", "Assignments", "Purchases", "Sales", "Low Stock", "Notes", "Reports"]
+    menu_options = ["Dashboard", "Users", "Suppliers", "Components", "Components Responsibility", "Purchases", "Sales", "Low Stock", "Notes", "Reports"]
 else:
-    menu_options = ["Dashboard", "Suppliers", "Products", "Assignments", "Purchases", "Sales", "Low Stock", "Notes", "Reports"]
+    menu_options = ["Dashboard", "Suppliers", "Components", "Components Responsibility", "Purchases", "Sales", "Low Stock", "Notes", "Reports"]
 
-menu = st.sidebar.selectbox("Select Module", menu_options)
+if "menu_select" not in st.session_state:
+    st.session_state.menu_select = menu_options[0]
+
+menu = st.sidebar.selectbox("Select Module", menu_options, key="menu_select", on_change=mark_menu_changed)
+
+if st.session_state.get("scroll_to_top"):
+    render_scroll_to_top()
+    st.session_state.scroll_to_top = False
 
 # ---------------- HELPER ----------------
 def format_inr(value):
@@ -185,6 +425,50 @@ def format_inr(value):
         return f"₹ {float(value):,.2f}"
     except:
         return "₹ 0.00"
+
+# ---------------- FILTER HELPER ----------------
+def apply_period_filter(df, date_column, key_prefix):
+    if df.empty or date_column not in df.columns:
+        return df
+
+    filter_type = st.selectbox(
+        "Filter By",
+        ["All", "Day", "Week", "Month", "Year"],
+        key=f"{key_prefix}_filter_type"
+    )
+
+    working_df = df.copy()
+    working_df[date_column] = pd.to_datetime(working_df[date_column], errors="coerce")
+    working_df = working_df.dropna(subset=[date_column])
+
+    if filter_type == "All":
+        return working_df
+
+    if filter_type == "Day":
+        selected_day = st.date_input("Select Day", key=f"{key_prefix}_day")
+        return working_df[working_df[date_column].dt.date == selected_day]
+
+    if filter_type == "Week":
+        selected_day = st.date_input("Select Any Date in Week", key=f"{key_prefix}_week")
+        selected_timestamp = pd.Timestamp(selected_day)
+        week_start = selected_timestamp - pd.Timedelta(days=selected_timestamp.weekday())
+        week_end = week_start + pd.Timedelta(days=6)
+        return working_df[
+            (working_df[date_column] >= week_start.normalize()) &
+            (working_df[date_column] < (week_end + pd.Timedelta(days=1)).normalize())
+        ]
+
+    if filter_type == "Month":
+        selected_month = st.date_input("Select Month", key=f"{key_prefix}_month")
+        return working_df[
+            (working_df[date_column].dt.year == selected_month.year) &
+            (working_df[date_column].dt.month == selected_month.month)
+        ]
+
+    year_options = sorted(working_df[date_column].dt.year.dropna().astype(int).unique(), reverse=True)
+    selected_year = st.selectbox("Select Year", year_options, key=f"{key_prefix}_year")
+    return working_df[working_df[date_column].dt.year == selected_year]
+
 
 # ---------------- DASHBOARD ----------------
 if menu == "Dashboard":
@@ -206,7 +490,7 @@ if menu == "Dashboard":
     total_sales_value = sales_df["total_sales_value"].sum() if not sales_df.empty else 0
 
     col1, col2, col3, col4 = st.columns(4)
-    col1.metric("Total Products", total_products)
+    col1.metric("Total Components", total_products)
     col2.metric("Total Suppliers", total_suppliers)
     col3.metric("Total Stock Qty", int(total_stock_qty))
     col4.metric("Total Employees", total_employees)
@@ -224,6 +508,34 @@ if menu == "Dashboard":
     else:
         st.info("No products available yet.")
 
+    st.subheader("Purchase Trend")
+    if not purchases_df.empty:
+        chart_scope = st.selectbox("Purchase View", ["Monthly", "Quarterly", "Yearly"], key="dashboard_purchase_chart")
+        chart_df = purchases_df.copy()
+        chart_df["purchase_date"] = pd.to_datetime(chart_df["purchase_date"], errors="coerce")
+        chart_df = chart_df.dropna(subset=["purchase_date"])
+
+        if not chart_df.empty:
+            if chart_scope == "Monthly":
+                chart_df["period"] = chart_df["purchase_date"].dt.to_period("M").astype(str)
+            elif chart_scope == "Quarterly":
+                chart_df["period"] = chart_df["purchase_date"].dt.to_period("Q").astype(str)
+            else:
+                chart_df["period"] = chart_df["purchase_date"].dt.year.astype(str)
+
+            grouped_chart_df = chart_df.groupby("period", as_index=False)["total_purchase_price"].sum()
+            purchase_chart = px.bar(
+                grouped_chart_df,
+                x="period",
+                y="total_purchase_price",
+                labels={"period": "Period", "total_purchase_price": "Purchase Value"},
+            )
+            st.plotly_chart(purchase_chart, use_container_width=True)
+        else:
+            st.info("No dated purchase records available for charting.")
+    else:
+        st.info("No purchase data available for charting yet.")
+
 # ---------------- USERS ----------------
 elif menu == "Users":
     st.header("👥 User Management")
@@ -236,16 +548,20 @@ elif menu == "Users":
         full_name = st.text_input("Full Name")
         username = st.text_input("Username")
         password = st.text_input("Password", type="password")
-        role = st.selectbox("Role", ["Admin", "Employee"])
+        role = st.selectbox("Role", ["Admin", "Employee", "CEO", "CBO", "CGO"])
         department = st.text_input("Department")
+        date_of_joining = st.date_input("Date of Joining")
+        office_email = st.text_input("Office Email ID")
+        company_email = st.text_input("Company Email ID")
+        contact_number = st.text_input("Contact Number")
 
         st.markdown("### Permissions")
-        can_edit_suppliers = st.checkbox("Can Edit Suppliers")
-        can_delete_suppliers = st.checkbox("Can Delete Suppliers")
-        can_edit_products = st.checkbox("Can Edit Products")
-        can_delete_products = st.checkbox("Can Delete Products")
-        can_edit_purchases = st.checkbox("Can Edit Purchases")
-        can_delete_purchases = st.checkbox("Can Delete Purchases")
+        can_edit_suppliers = st.selectbox("Can Edit Suppliers", [1, 0], format_func=lambda value: "Yes" if value == 1 else "No")
+        can_delete_suppliers = st.selectbox("Can Delete Suppliers", [1, 0], format_func=lambda value: "Yes" if value == 1 else "No")
+        can_edit_products = st.selectbox("Can Edit Components", [1, 0], format_func=lambda value: "Yes" if value == 1 else "No")
+        can_delete_products = st.selectbox("Can Delete Components", [1, 0], format_func=lambda value: "Yes" if value == 1 else "No")
+        can_edit_purchases = st.selectbox("Can Edit Purchases", [1, 0], format_func=lambda value: "Yes" if value == 1 else "No")
+        can_delete_purchases = st.selectbox("Can Delete Purchases", [1, 0], format_func=lambda value: "Yes" if value == 1 else "No")
 
         submitted = st.form_submit_button("Add User")
 
@@ -254,6 +570,7 @@ elif menu == "Users":
                 try:
                     result = add_user(
                         full_name, username, password, role, department,
+                        str(date_of_joining), office_email, company_email, contact_number,
                         int(can_edit_suppliers), int(can_delete_suppliers),
                         int(can_edit_products), int(can_delete_products),
                         int(can_edit_purchases), int(can_delete_purchases)
@@ -288,16 +605,29 @@ elif menu == "Users":
             edit_full_name = st.text_input("Full Name", value=selected_user_row["full_name"])
             edit_username = st.text_input("Username", value=selected_user_row["username"])
             edit_password = st.text_input("Password", type="password")
-            edit_role = st.selectbox("Role", ["Admin", "Employee"], index=0 if selected_user_row["role"] == "Admin" else 1)
+            role_options = ["Admin", "Employee", "CEO", "CBO", "CGO"]
+            edit_role = st.selectbox(
+                "Role",
+                role_options,
+                index=role_options.index(selected_user_row["role"]) if selected_user_row["role"] in role_options else 1
+            )
             edit_department = st.text_input("Department", value=selected_user_row["department"] if pd.notna(selected_user_row["department"]) else "")
+            edit_joining_date = st.date_input(
+                "Date of Joining",
+                value=pd.to_datetime(selected_user_row["date_of_joining"]).date() if pd.notna(selected_user_row["date_of_joining"]) and str(selected_user_row["date_of_joining"]).strip() else date.today(),
+                key="edit_joining_date"
+            )
+            edit_office_email = st.text_input("Office Email ID", value=selected_user_row["office_email"] if pd.notna(selected_user_row["office_email"]) else "")
+            edit_company_email = st.text_input("Company Email ID", value=selected_user_row["company_email"] if pd.notna(selected_user_row["company_email"]) else "")
+            edit_contact_number = st.text_input("Contact Number", value=selected_user_row["contact_number"] if pd.notna(selected_user_row["contact_number"]) else "")
 
             st.markdown("### Permissions")
-            edit_can_edit_suppliers = st.checkbox("Can Edit Suppliers", value=bool(selected_user_row["can_edit_suppliers"]), key="e1")
-            edit_can_delete_suppliers = st.checkbox("Can Delete Suppliers", value=bool(selected_user_row["can_delete_suppliers"]), key="e2")
-            edit_can_edit_products = st.checkbox("Can Edit Products", value=bool(selected_user_row["can_edit_products"]), key="e3")
-            edit_can_delete_products = st.checkbox("Can Delete Products", value=bool(selected_user_row["can_delete_products"]), key="e4")
-            edit_can_edit_purchases = st.checkbox("Can Edit Purchases", value=bool(selected_user_row["can_edit_purchases"]), key="e5")
-            edit_can_delete_purchases = st.checkbox("Can Delete Purchases", value=bool(selected_user_row["can_delete_purchases"]), key="e6")
+            edit_can_edit_suppliers = st.selectbox("Can Edit Suppliers", [1, 0], index=0 if int(selected_user_row["can_edit_suppliers"]) == 1 else 1, format_func=lambda value: "Yes" if value == 1 else "No", key="e1")
+            edit_can_delete_suppliers = st.selectbox("Can Delete Suppliers", [1, 0], index=0 if int(selected_user_row["can_delete_suppliers"]) == 1 else 1, format_func=lambda value: "Yes" if value == 1 else "No", key="e2")
+            edit_can_edit_products = st.selectbox("Can Edit Components", [1, 0], index=0 if int(selected_user_row["can_edit_products"]) == 1 else 1, format_func=lambda value: "Yes" if value == 1 else "No", key="e3")
+            edit_can_delete_products = st.selectbox("Can Delete Components", [1, 0], index=0 if int(selected_user_row["can_delete_products"]) == 1 else 1, format_func=lambda value: "Yes" if value == 1 else "No", key="e4")
+            edit_can_edit_purchases = st.selectbox("Can Edit Purchases", [1, 0], index=0 if int(selected_user_row["can_edit_purchases"]) == 1 else 1, format_func=lambda value: "Yes" if value == 1 else "No", key="e5")
+            edit_can_delete_purchases = st.selectbox("Can Delete Purchases", [1, 0], index=0 if int(selected_user_row["can_delete_purchases"]) == 1 else 1, format_func=lambda value: "Yes" if value == 1 else "No", key="e6")
 
             update_user_btn = st.form_submit_button("Update User")
 
@@ -310,6 +640,10 @@ elif menu == "Users":
                         edit_password,
                         edit_role,
                         edit_department,
+                        str(edit_joining_date),
+                        edit_office_email,
+                        edit_company_email,
+                        edit_contact_number,
                         int(edit_can_edit_suppliers),
                         int(edit_can_delete_suppliers),
                         int(edit_can_edit_products),
@@ -404,14 +738,16 @@ elif menu == "Suppliers":
                 "Supplier deleted successfully!"
             )
 
-# ---------------- PRODUCTS ----------------
-elif menu == "Products":
-    st.header("🛒 Product Management")
+# ---------------- COMPONENTS ----------------
+elif menu == "Components":
+    st.header("🛒 Component Management")
 
     suppliers_df = get_suppliers()
+    users_dropdown_df = get_user_dropdown()
+    employee_names = users_dropdown_df["full_name"].dropna().tolist() if not users_dropdown_df.empty else []
 
     if suppliers_df.empty:
-        st.warning("Please add suppliers first before adding products.")
+        st.warning("Please add suppliers first before adding components.")
     else:
         supplier_options = {
             row["supplier_name"]: row["supplier_id"]
@@ -422,15 +758,19 @@ elif menu == "Products":
         st.info(f"Auto Product No: {auto_product_no}")
 
         with st.form("product_form", clear_on_submit=True):
-            product_name = st.text_input("Product Name")
+            product_name = st.text_input("Component Name")
             category = st.text_input("Category")
-            price = st.number_input("Product Price (₹)", min_value=0.0, format="%.2f")
+            price = st.number_input("Component Price (₹)", min_value=0.0, format="%.2f")
             reorder_level = st.number_input("Reorder Level", min_value=1, value=5)
             supplier_name = st.selectbox("Supplier", list(supplier_options.keys()))
-            assigned_to = st.text_input("Assigned To / Responsible Person")
-            product_image = st.file_uploader("Upload Product Image", type=["png", "jpg", "jpeg"], key="product_image")
+            assigned_to = st.selectbox(
+                "Assigned To / Responsible Person",
+                [""] + employee_names,
+                format_func=lambda value: value if value else "Not Assigned"
+            )
+            product_image = st.file_uploader("Upload Component Image", type=["png", "jpg", "jpeg"], key="product_image")
 
-            submitted = st.form_submit_button("Add Product")
+            submitted = st.form_submit_button("Add Component")
 
             if submitted:
                 if product_name.strip():
@@ -455,11 +795,11 @@ elif menu == "Products":
                     except ValueError as error:
                         st.error(str(error))
                 else:
-                    st.error("Product Name is required.")
+                    st.error("Component Name is required.")
 
-    st.subheader("🔍 Search Products")
+    st.subheader("🔍 Search Components")
     products_df = get_products()
-    search_term = st.text_input("Search by Product No / Product Name")
+    search_term = st.text_input("Search by Component No / Component Name")
 
     if not products_df.empty:
         if search_term:
@@ -472,19 +812,23 @@ elif menu == "Products":
         display_df["price"] = display_df["price"].apply(format_inr)
         st.dataframe(display_df, use_container_width=True)
 
-        st.subheader("🖼 Product Image Preview")
-        selected_product_no = st.selectbox("Select Product to Preview Image", products_df["product_no"].tolist())
+        st.subheader("🖼 Component Image Preview")
+        selected_product_no = st.selectbox("Select Component to Preview Image", products_df["product_no"].tolist())
         selected_row = products_df[products_df["product_no"] == selected_product_no].iloc[0]
 
         if selected_row["image_path"] and os.path.exists(selected_row["image_path"]):
-            st.image(selected_row["image_path"], caption=selected_row["product_name"], width=250)
+            st.image(selected_row["image_path"], caption=selected_row["product_name"], width=550)
         else:
-            st.info("No image uploaded for this product.")
+            st.info("No image uploaded for this component.")
 
         if st.session_state.user_role == "Admin" or st.session_state.permissions["can_edit_products"] == 1:
-            st.subheader("✏ Edit Product")
-            edit_product_no = st.selectbox("Select Product No to Edit", products_df["product_no"].tolist(), key="edit_product")
-            edit_row = products_df[products_df["product_no"] == edit_product_no].iloc[0]
+            st.subheader("✏ Edit Component")
+            product_edit_options = {
+                f"{row['product_id']} - {row['product_no']} - {row['product_name']}": row["product_no"]
+                for _, row in products_df.iterrows()
+            }
+            edit_product_no = st.selectbox("Select Component to Edit", list(product_edit_options.keys()), key="edit_product")
+            edit_row = products_df[products_df["product_no"] == product_edit_options[edit_product_no]].iloc[0]
 
             edit_supplier_name = st.selectbox(
                 "Edit Supplier",
@@ -495,13 +839,22 @@ elif menu == "Products":
             )
 
             with st.form("edit_product_form"):
-                edit_name = st.text_input("Product Name", value=edit_row["product_name"])
+                edit_name = st.text_input("Component Name", value=edit_row["product_name"])
                 edit_category = st.text_input("Category", value=edit_row["category"] if pd.notna(edit_row["category"]) else "")
                 edit_price = st.number_input("Price", min_value=0.0, value=float(edit_row["price"]))
                 edit_reorder = st.number_input("Reorder Level", min_value=1, value=int(edit_row["reorder_level"]))
-                edit_assigned = st.text_input("Assigned To", value=edit_row["assigned_to"] if pd.notna(edit_row["assigned_to"]) else "")
+                current_assigned = edit_row["assigned_to"] if pd.notna(edit_row["assigned_to"]) else ""
+                assigned_options = [""] + employee_names
+                if current_assigned and current_assigned not in assigned_options:
+                    assigned_options.append(current_assigned)
+                edit_assigned = st.selectbox(
+                    "Assigned To",
+                    assigned_options,
+                    index=assigned_options.index(current_assigned) if current_assigned in assigned_options else 0,
+                    format_func=lambda value: value if value else "Not Assigned"
+                )
 
-                if st.form_submit_button("Update Product"):
+                if st.form_submit_button("Update Component"):
                     try:
                         update_product(
                             edit_row["product_id"],
@@ -512,29 +865,35 @@ elif menu == "Products":
                             supplier_options[edit_supplier_name],
                             edit_assigned
                         )
-                        force_refresh("Product updated successfully!")
+                        force_refresh("Component updated successfully!")
                     except ValueError as error:
                         st.error(str(error))
 
         if st.session_state.user_role == "Admin" or st.session_state.permissions["can_delete_products"] == 1:
-            st.subheader("🗑 Delete Product")
-            delete_product_no = st.selectbox("Select Product No to Delete", products_df["product_no"].tolist(), key="delete_product")
-            delete_row = products_df[products_df["product_no"] == delete_product_no].iloc[0]
+            st.subheader("🗑 Delete Component")
+            product_delete_options = {
+                f"{row['product_id']} - {row['product_no']} - {row['product_name']}": row["product_no"]
+                for _, row in products_df.iterrows()
+            }
+            delete_product_no = st.selectbox("Select Component to Delete", list(product_delete_options.keys()), key="delete_product")
+            delete_row = products_df[products_df["product_no"] == product_delete_options[delete_product_no]].iloc[0]
 
-            if st.button("Delete Product"):
+            if st.button("Delete Component"):
                 run_action(
                     lambda: delete_product(delete_row["product_id"]),
-                    f"Product {delete_product_no} deleted successfully!"
+                    f"Component {delete_row['product_no']} deleted successfully!"
                 )
 
-# ---------------- ASSIGNMENTS ----------------
-elif menu == "Assignments":
-    st.header("👤 Product Responsibility Transfer")
+# ---------------- COMPONENTS RESPONSIBILITY ----------------
+elif menu == "Components Responsibility":
+    st.header("👤 Component Responsibility Transfer")
 
     products_df = get_product_dropdown()
+    users_dropdown_df = get_user_dropdown()
+    employee_names = users_dropdown_df["full_name"].dropna().tolist() if not users_dropdown_df.empty else []
 
     if products_df.empty:
-        st.warning("Please add products first.")
+        st.warning("Please add components first.")
     else:
         product_options = {
             f"{row['product_no']} - {row['product_name']}": {
@@ -544,13 +903,17 @@ elif menu == "Assignments":
             for _, row in products_df.iterrows()
         }
 
-        selected_product = st.selectbox("Select Product", list(product_options.keys()))
+        selected_product = st.selectbox("Select Component", list(product_options.keys()))
         current_person = product_options[selected_product]["assigned_to"]
 
         st.info(f"Current Responsible Person: {current_person if current_person else 'Not Assigned'}")
 
-        new_person = st.text_input("Transfer Responsibility To")
-        assigned_date = st.date_input("Assignment Date")
+        new_person = st.selectbox(
+            "Transfer Responsibility To",
+            [""] + employee_names,
+            format_func=lambda value: value if value else "Select Employee"
+        )
+        assigned_date = st.date_input("Assignment Date", format="DD/MM/YYYY")
         status = st.selectbox("Status", ["In Progress", "Under Review", "Testing", "Completed"])
         remarks = st.text_area("Remarks (Optional)", placeholder="Example: Handed over to Person 2")
 
@@ -563,7 +926,7 @@ elif menu == "Assignments":
                 except ValueError as error:
                     st.error(str(error))
             else:
-                st.error("Please enter the responsible person name.")
+                st.error("Please select the responsible person.")
 
     st.subheader("📜 Assignment History")
     history_df = get_assignment_history()
@@ -577,7 +940,7 @@ elif menu == "Purchases":
     suppliers_df = get_suppliers()
 
     if products_df.empty or suppliers_df.empty:
-        st.warning("Please add suppliers and products first.")
+        st.warning("Please add suppliers and components first.")
     else:
         product_options = {
             f"{row['product_no']} - {row['product_name']}": {
@@ -593,46 +956,53 @@ elif menu == "Purchases":
             for _, row in suppliers_df.iterrows()
         }
 
-        with st.form("purchase_form", clear_on_submit=True):
-            selected_product = st.selectbox("Select Product", list(product_options.keys()))
-            selected_supplier = st.selectbox("Select Supplier", list(supplier_options.keys()))
-            quantity = st.number_input("Quantity Purchased", min_value=1, step=1)
-            purchase_date = st.date_input("Purchase Date")
-            invoice_file = st.file_uploader("Upload Invoice", type=["pdf", "png", "jpg", "jpeg"], key="purchase_invoice")
+        selected_product = st.selectbox("Select Component", list(product_options.keys()), key="purchase_product")
+        selected_supplier = st.selectbox("Select Supplier", list(supplier_options.keys()), key="purchase_supplier")
+        quantity = st.number_input("Quantity Purchased", min_value=1, step=1, key="purchase_quantity")
+        purchase_date = st.date_input("Purchase Date", key="purchase_date", format="DD/MM/YYYY")
+        invoice_file = st.file_uploader("Upload Invoice", type=["pdf", "png", "jpg", "jpeg"], key="purchase_invoice")
 
-            unit_price = product_options[selected_product]["price"]
-            total_purchase_price = unit_price * quantity
+        unit_price = product_options[selected_product]["price"]
+        total_purchase_price = unit_price * quantity
 
-            st.info(f"Unit Price: {format_inr(unit_price)}")
-            st.success(f"Total Purchase Price: {format_inr(total_purchase_price)}")
+        st.info(f"Unit Price: {format_inr(unit_price)}")
+        st.success(f"Total Purchase Price: {format_inr(total_purchase_price)}")
 
-            if st.form_submit_button("Add Purchase"):
-                product_id = product_options[selected_product]["id"]
-                supplier_id = supplier_options[selected_supplier]
-                product_no = product_options[selected_product]["product_no"]
+        if invoice_file is not None:
+            invoice_ext = os.path.splitext(invoice_file.name)[1].lower()
+            if invoice_ext in [".png", ".jpg", ".jpeg"]:
+                st.image(invoice_file, caption="Invoice Preview", width=550)
+            else:
+                st.info(f"Selected invoice: {invoice_file.name}")
 
-                invoice_path = ""
-                if invoice_file is not None:
-                    ext = os.path.splitext(invoice_file.name)[1]
-                    invoice_filename = f"INV_{product_no}_{purchase_date}{ext}"
-                    invoice_path = save_uploaded_file(invoice_file, PURCHASE_INVOICES_DIR, invoice_filename)
+        if st.button("Add Purchase", key="add_purchase_button"):
+            product_id = product_options[selected_product]["id"]
+            supplier_id = supplier_options[selected_supplier]
+            product_no = product_options[selected_product]["product_no"]
 
-                try:
-                    add_purchase(
-                        product_id,
-                        supplier_id,
-                        quantity,
-                        unit_price,
-                        total_purchase_price,
-                        str(purchase_date),
-                        invoice_path
-                    )
-                    force_refresh("Purchase recorded successfully!")
-                except ValueError as error:
-                    st.error(str(error))
+            invoice_path = ""
+            if invoice_file is not None:
+                ext = os.path.splitext(invoice_file.name)[1]
+                invoice_filename = f"INV_{product_no}_{purchase_date}{ext}"
+                invoice_path = save_uploaded_file(invoice_file, PURCHASE_INVOICES_DIR, invoice_filename)
+
+            try:
+                add_purchase(
+                    product_id,
+                    supplier_id,
+                    quantity,
+                    unit_price,
+                    total_purchase_price,
+                    str(purchase_date),
+                    invoice_path
+                )
+                force_refresh("Purchase recorded successfully!")
+            except ValueError as error:
+                st.error(str(error))
 
     st.subheader("📜 Purchase History")
     purchase_df = get_purchases()
+    purchase_df = apply_period_filter(purchase_df, "purchase_date", "purchase_history")
 
     if not purchase_df.empty:
         display_df = purchase_df.copy()
@@ -641,7 +1011,7 @@ elif menu == "Purchases":
         st.dataframe(display_df, use_container_width=True)
 
         purchase_options = {
-            f"{row['purchase_id']} - {row['product_no']}": row["purchase_id"]
+            f"{row['purchase_id']} - {row['product_no']} - {row['product_name']}": row["purchase_id"]
             for _, row in purchase_df.iterrows()
         }
 
@@ -653,11 +1023,35 @@ elif menu == "Purchases":
 
             with st.form("edit_purchase_form"):
                 edit_qty = st.number_input("Quantity Purchased", min_value=1, value=int(purchase_row["quantity_purchased"]))
-                edit_date = st.date_input("Purchase Date", value=pd.to_datetime(purchase_row["purchase_date"]).date())
+                edit_date = st.date_input("Purchase Date", value=pd.to_datetime(purchase_row["purchase_date"]).date(), format="DD/MM/YYYY")
+                supplier_names = list(supplier_options.keys())
+                current_supplier_name = purchase_row["supplier_name"] if pd.notna(purchase_row["supplier_name"]) else supplier_names[0]
+                edit_supplier_name = st.selectbox(
+                    "Supplier",
+                    supplier_names,
+                    index=supplier_names.index(current_supplier_name) if current_supplier_name in supplier_names else 0
+                )
+                edit_invoice_file = st.file_uploader(
+                    "Replace Invoice (Optional)",
+                    type=["pdf", "png", "jpg", "jpeg"],
+                    key="edit_purchase_invoice"
+                )
 
                 if st.form_submit_button("Update Purchase"):
                     try:
-                        update_purchase(selected_purchase_id, edit_qty, str(edit_date))
+                        edit_invoice_path = purchase_row["invoice_path"] if pd.notna(purchase_row["invoice_path"]) else ""
+                        if edit_invoice_file is not None:
+                            ext = os.path.splitext(edit_invoice_file.name)[1]
+                            invoice_filename = f"INV_{purchase_row['product_no']}_{edit_date}{ext}"
+                            edit_invoice_path = save_uploaded_file(edit_invoice_file, PURCHASE_INVOICES_DIR, invoice_filename)
+
+                        update_purchase(
+                            selected_purchase_id,
+                            edit_qty,
+                            supplier_options[edit_supplier_name],
+                            str(edit_date),
+                            edit_invoice_path
+                        )
                         force_refresh("Purchase updated successfully!")
                     except ValueError as error:
                         st.error(str(error))
@@ -680,7 +1074,7 @@ elif menu == "Sales":
     products_df = get_products()
 
     if products_df.empty:
-        st.warning("Please add products first.")
+        st.warning("Please add components first.")
     else:
         product_options = {
             f"{row['product_no']} - {row['product_name']}": {"id": row["product_id"], "price": row["price"]}
@@ -688,7 +1082,7 @@ elif menu == "Sales":
         }
 
         with st.form("sales_form", clear_on_submit=True):
-            selected_product = st.selectbox("Select Product", list(product_options.keys()))
+            selected_product = st.selectbox("Select Component", list(product_options.keys()))
             quantity_sold = st.number_input("Quantity Sold", min_value=1, step=1)
             sale_date = st.date_input("Sale Date")
             customer_name = st.text_input("Customer Name (Optional)")
@@ -769,23 +1163,31 @@ elif menu == "Low Stock":
     if low_stock_df.empty:
         st.success("No low stock items. Inventory looks healthy.")
     else:
-        st.warning("These products need restocking:")
+        st.warning("These components need restocking:")
         st.dataframe(low_stock_df, use_container_width=True)
 
 # ---------------- NOTES ----------------
 elif menu == "Notes":
     st.header("📝 Work Notes")
 
+    users_dropdown_df = get_user_dropdown()
+    employee_names = users_dropdown_df["full_name"].dropna().tolist() if not users_dropdown_df.empty else []
+
     with st.form("notes_form", clear_on_submit=True):
         note_title = st.text_input("Note Title")
         note_content = st.text_area("Note Content")
         note_status = st.selectbox("Status", ["Open", "In Progress", "Completed"])
+        assigned_to = st.selectbox(
+            "Assigned To",
+            [""] + employee_names,
+            format_func=lambda value: value if value else "Not Assigned"
+        )
         submitted = st.form_submit_button("Add Note")
 
         if submitted:
             if note_title.strip() and note_content.strip():
                 try:
-                    add_note(note_title, note_content, st.session_state.full_name, str(date.today()), note_status)
+                    add_note(note_title, note_content, st.session_state.full_name, str(date.today()), note_status, assigned_to)
                     force_refresh("Note added successfully!")
                 except ValueError as error:
                     st.error(str(error))
@@ -812,10 +1214,20 @@ elif menu == "Notes":
             edit_content = st.text_area("Edit Content", value=note_row["note_content"])
             edit_status = st.selectbox("Edit Status", ["Open", "In Progress", "Completed"],
                                        index=["Open", "In Progress", "Completed"].index(note_row["note_status"]))
+            current_note_assigned = note_row["assigned_to"] if pd.notna(note_row["assigned_to"]) else ""
+            note_assigned_options = [""] + employee_names
+            if current_note_assigned and current_note_assigned not in note_assigned_options:
+                note_assigned_options.append(current_note_assigned)
+            edit_assigned_to = st.selectbox(
+                "Assigned To",
+                note_assigned_options,
+                index=note_assigned_options.index(current_note_assigned) if current_note_assigned in note_assigned_options else 0,
+                format_func=lambda value: value if value else "Not Assigned"
+            )
 
             if st.form_submit_button("Update Note"):
                 try:
-                    update_note(selected_note_id, edit_title, edit_content, edit_status)
+                    update_note(selected_note_id, edit_title, edit_content, edit_status, edit_assigned_to)
                     force_refresh("Note updated successfully!")
                 except ValueError as error:
                     st.error(str(error))
@@ -836,12 +1248,12 @@ elif menu == "Reports":
 
     report_type = st.selectbox(
         "Select Report",
-        ["Products Report", "Suppliers Report", "Purchases Report", "Sales Report", "Low Stock Report", "Assignment History Report", "Users Report", "Notes Report"]
+        ["Components Report", "Suppliers Report", "Purchases Report", "Sales Report", "Low Stock Report", "Components Responsibility Report", "Users Report", "Notes Report"]
     )
 
     df = pd.DataFrame()
 
-    if report_type == "Products Report":
+    if report_type == "Components Report":
         df = get_products()
         if not df.empty:
             df["price"] = df["price"].apply(format_inr)
@@ -851,12 +1263,14 @@ elif menu == "Reports":
 
     elif report_type == "Purchases Report":
         df = get_purchases()
+        df = apply_period_filter(df, "purchase_date", "reports_purchase")
         if not df.empty:
             df["unit_price"] = df["unit_price"].apply(format_inr)
             df["total_purchase_price"] = df["total_purchase_price"].apply(format_inr)
 
     elif report_type == "Sales Report":
         df = get_sales()
+        df = apply_period_filter(df, "sale_date", "reports_sales")
         if not df.empty:
             df["selling_price"] = df["selling_price"].apply(format_inr)
             df["total_sales_value"] = df["total_sales_value"].apply(format_inr)
@@ -864,14 +1278,17 @@ elif menu == "Reports":
     elif report_type == "Low Stock Report":
         df = get_low_stock()
 
-    elif report_type == "Assignment History Report":
+    elif report_type == "Components Responsibility Report":
         df = get_assignment_history()
+        df = apply_period_filter(df, "assigned_date", "reports_assignments")
 
     elif report_type == "Users Report":
         df = get_users()
+        df = apply_period_filter(df, "date_of_joining", "reports_users")
 
     elif report_type == "Notes Report":
         df = get_notes()
+        df = apply_period_filter(df, "created_date", "reports_notes")
 
     if not df.empty:
         st.dataframe(df, use_container_width=True)
