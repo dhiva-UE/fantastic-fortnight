@@ -514,36 +514,57 @@ def add_product(product_no, name, category, price, reorder_level, supplier_id, i
     conn = get_connection()
     try:
         cursor = conn.cursor()
-        cursor.execute(
-            adapt_query("""
-                INSERT INTO products (
-                    product_no, product_name, category, price, reorder_level, supplier_id, image_path, assigned_to, is_active
-                )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """),
-            (
-                product_no,
-                product_name,
-                normalized_category,
-                validated_price,
-                validated_reorder_level,
-                supplier_id,
-                normalized_image_path,
-                normalized_assigned_to,
-                1,
-            ),
-        )
+        if using_postgresql():
+            cursor.execute(
+                adapt_query("""
+                    INSERT INTO products (
+                        product_no, product_name, category, price, reorder_level, supplier_id, image_path, assigned_to, is_active
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    RETURNING product_id
+                """),
+                (
+                    product_no,
+                    product_name,
+                    normalized_category,
+                    validated_price,
+                    validated_reorder_level,
+                    supplier_id,
+                    normalized_image_path,
+                    normalized_assigned_to,
+                    1,
+                ),
+            )
+            inserted_product_id = cursor.fetchone()[0]
+        else:
+            cursor.execute(
+                adapt_query("""
+                    INSERT INTO products (
+                        product_no, product_name, category, price, reorder_level, supplier_id, image_path, assigned_to, is_active
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """),
+                (
+                    product_no,
+                    product_name,
+                    normalized_category,
+                    validated_price,
+                    validated_reorder_level,
+                    supplier_id,
+                    normalized_image_path,
+                    normalized_assigned_to,
+                    1,
+                ),
+            )
+            inserted_product_id = cursor.lastrowid
 
         if normalized_assigned_to:
             cursor.execute(
                 adapt_query(f"""
                     INSERT INTO product_assignments (product_id, assigned_to, assigned_date, remarks, status)
-                    VALUES (
-                        (SELECT product_id FROM products WHERE product_no = ?),
-                        ?, {current_date_sql()}, ?, ?
-                    )
+                    VALUES (?, ?, {current_date_sql()}, ?, ?)
                 """),
-                (product_no, normalized_assigned_to, "Initial Assignment", "In Progress"),
+                (inserted_product_id, normalized_assigned_to, "Initial Assignment", "In Progress"),
             )
 
         conn.commit()
@@ -582,44 +603,71 @@ def update_product(product_id, name, category, price, reorder_level, supplier_id
     product_name = require_text(name, "Product name")
     validated_price = require_non_negative_number(price, "Price")
     validated_reorder_level = require_positive_int(reorder_level, "Reorder level")
+    normalized_assigned_to = normalize_text(assigned_to)
     normalized_image_path = normalize_text(image_path) if image_path is not None else None
+    normalized_category = normalize_text(category)
 
-    if image_path is not None:
-        execute(
-            """
-            UPDATE products
-            SET product_name = ?, category = ?, price = ?, reorder_level = ?, supplier_id = ?, assigned_to = ?, image_path = ?
-            WHERE product_id = ?
-            """,
-            (
-                product_name,
-                normalize_text(category),
-                validated_price,
-                validated_reorder_level,
-                supplier_id,
-                normalize_text(assigned_to),
-                normalized_image_path,
-                product_id,
-            ),
+    conn = get_connection()
+    try:
+        cursor = conn.cursor()
+        cursor.execute(
+            adapt_query("SELECT assigned_to FROM products WHERE product_id = ?"),
+            (product_id,),
         )
-        return
+        existing_row = cursor.fetchone()
+        previous_assigned_to = normalize_text(existing_row[0]) if existing_row else ""
 
-    execute(
-        """
-        UPDATE products
-        SET product_name = ?, category = ?, price = ?, reorder_level = ?, supplier_id = ?, assigned_to = ?
-        WHERE product_id = ?
-        """,
-        (
-            product_name,
-            normalize_text(category),
-            validated_price,
-            validated_reorder_level,
-            supplier_id,
-            normalize_text(assigned_to),
-            product_id,
-        ),
-    )
+        if image_path is not None:
+            cursor.execute(
+                adapt_query("""
+                    UPDATE products
+                    SET product_name = ?, category = ?, price = ?, reorder_level = ?, supplier_id = ?, assigned_to = ?, image_path = ?
+                    WHERE product_id = ?
+                """),
+                (
+                    product_name,
+                    normalized_category,
+                    validated_price,
+                    validated_reorder_level,
+                    supplier_id,
+                    normalized_assigned_to,
+                    normalized_image_path,
+                    product_id,
+                ),
+            )
+        else:
+            cursor.execute(
+                adapt_query("""
+                    UPDATE products
+                    SET product_name = ?, category = ?, price = ?, reorder_level = ?, supplier_id = ?, assigned_to = ?
+                    WHERE product_id = ?
+                """),
+                (
+                    product_name,
+                    normalized_category,
+                    validated_price,
+                    validated_reorder_level,
+                    supplier_id,
+                    normalized_assigned_to,
+                    product_id,
+                ),
+            )
+
+        if normalized_assigned_to and normalized_assigned_to != previous_assigned_to:
+            cursor.execute(
+                adapt_query(f"""
+                    INSERT INTO product_assignments (product_id, assigned_to, assigned_date, remarks, status)
+                    VALUES (?, ?, {current_date_sql()}, ?, ?)
+                """),
+                (product_id, normalized_assigned_to, "Updated from component form", "In Progress"),
+            )
+
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
 
 
 def delete_product(product_id):

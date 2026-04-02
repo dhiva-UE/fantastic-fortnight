@@ -1,5 +1,5 @@
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   createComponent,
   createAssignment,
@@ -67,9 +67,153 @@ function getCellDisplayValue(value) {
   return String(value);
 }
 
-function escapeCsvValue(value) {
-  const normalized = String(value ?? "").replace(/"/g, "\"\"");
-  return `"${normalized}"`;
+function scrollPageToTop() {
+  window.scrollTo({ top: 0, behavior: "smooth" });
+}
+
+function ConfirmDialog({ open, title, message, confirmLabel = "Confirm", cancelLabel = "Cancel", danger = false, onConfirm, onCancel }) {
+  if (!open) {
+    return null;
+  }
+
+  return (
+    <div className="modal-overlay" role="presentation" onClick={onCancel}>
+      <div
+        className="modal-card confirm-dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="confirm-dialog-title"
+        onClick={(event) => event.stopPropagation()}
+      >
+        <div className="panel-header">
+          <div>
+            <h3 id="confirm-dialog-title">{title}</h3>
+            <p className="panel-copy">{message}</p>
+          </div>
+        </div>
+        <div className="confirm-dialog-actions">
+          <button className="ghost-button slim" type="button" onClick={onCancel}>
+            {cancelLabel}
+          </button>
+          <button className={danger ? "danger-button slim" : "ghost-button slim"} type="button" onClick={onConfirm}>
+            {confirmLabel}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function SearchableSelect({
+  options,
+  value,
+  onChange,
+  placeholder = "Search and select",
+  disabled = false,
+  allowEmpty = false,
+  emptyLabel = "None"
+}) {
+  const wrapperRef = useRef(null);
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
+
+  const selectedOption = useMemo(
+    () => options.find((option) => String(option.value) === String(value)) || null,
+    [options, value]
+  );
+
+  useEffect(() => {
+    setQuery(selectedOption?.label ?? "");
+  }, [selectedOption]);
+
+  useEffect(() => {
+    if (!open) {
+      return undefined;
+    }
+
+    const handlePointerDown = (event) => {
+      if (wrapperRef.current && !wrapperRef.current.contains(event.target)) {
+        setOpen(false);
+        setQuery(selectedOption?.label ?? "");
+      }
+    };
+
+    document.addEventListener("mousedown", handlePointerDown);
+    return () => document.removeEventListener("mousedown", handlePointerDown);
+  }, [open, selectedOption]);
+
+  const filteredOptions = useMemo(() => {
+    const normalized = query.trim().toLowerCase();
+    if (!normalized) {
+      return options;
+    }
+
+    return options.filter((option) => option.label.toLowerCase().includes(normalized));
+  }, [options, query]);
+
+  const selectOption = (nextValue) => {
+    onChange(nextValue);
+    const nextSelected = options.find((option) => String(option.value) === String(nextValue));
+    setQuery(nextSelected?.label ?? "");
+    setOpen(false);
+  };
+
+  const handleBlur = () => {
+    window.setTimeout(() => {
+      setOpen(false);
+      setQuery(selectedOption?.label ?? "");
+    }, 120);
+  };
+
+  return (
+    <div className={`search-select ${disabled ? "disabled" : ""}`} ref={wrapperRef}>
+      <input
+        type="text"
+        value={query}
+        placeholder={placeholder}
+        disabled={disabled}
+        onFocus={() => !disabled && setOpen(true)}
+        onClick={() => !disabled && setOpen(true)}
+        onChange={(event) => {
+          setQuery(event.target.value);
+          setOpen(true);
+        }}
+        onBlur={handleBlur}
+      />
+      <button
+        className="search-select-toggle"
+        type="button"
+        disabled={disabled}
+        aria-label="Toggle options"
+        onMouseDown={(event) => event.preventDefault()}
+        onClick={() => !disabled && setOpen((current) => !current)}
+      >
+        ▾
+      </button>
+      {open ? (
+        <div className="search-select-menu">
+          {allowEmpty ? (
+            <button className="search-select-option" type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => selectOption("")}>
+              {emptyLabel}
+            </button>
+          ) : null}
+          {filteredOptions.length === 0 ? (
+            <div className="search-select-empty">No matching records</div>
+          ) : filteredOptions.map((option) => (
+            <button
+              key={option.value}
+              className={`search-select-option ${String(option.value) === String(value) ? "active" : ""}`}
+              type="button"
+              onMouseDown={(event) => event.preventDefault()}
+              onClick={() => selectOption(option.value)}
+            >
+              {option.label}
+            </button>
+          ))}
+        </div>
+      ) : null}
+    </div>
+  );
 }
 
 function DataCard({ title, columns, rows }) {
@@ -97,34 +241,37 @@ function DataCard({ title, columns, rows }) {
       return;
     }
 
-    const headerRow = columns.map((column) => escapeCsvValue(column.label)).join(",");
-    const dataRows = filteredRows.map((row) => (
-      columns.map((column) => escapeCsvValue(getCellDisplayValue(row[column.key]))).join(",")
-    ));
-    const csvContent = [headerRow, ...dataRows].join("\n");
-    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    const fileName = `${title.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "report"}.csv`;
+    const escapeCsvValue = (value) => {
+      const stringValue = value === null || value === undefined ? "" : String(value);
+      const escapedValue = stringValue.replace(/"/g, '""');
+      return `"${escapedValue}"`;
+    };
 
-    link.href = url;
-    link.download = fileName;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    URL.revokeObjectURL(url);
+    const headerRow = columns.map((column) => escapeCsvValue(column.label)).join(",");
+    const dataRows = filteredRows.map((row) =>
+      columns.map((column) => escapeCsvValue(row[column.key])).join(",")
+    );
+    const csvContent = [headerRow, ...dataRows].join("\n");
+    const csvBlob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+    const objectUrl = URL.createObjectURL(csvBlob);
+    const downloadLink = document.createElement("a");
+    const safeTitle = title.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "");
+
+    downloadLink.href = objectUrl;
+    downloadLink.setAttribute("download", `${safeTitle || "report"}.csv`);
+    document.body.appendChild(downloadLink);
+    downloadLink.click();
+    document.body.removeChild(downloadLink);
+    URL.revokeObjectURL(objectUrl);
   };
 
   return (
     <section className="panel">
-      <div className="panel-header split-header">
+      <div className="panel-header">
         <div>
           <h3>{title}</h3>
-          <p className="panel-copy">Filter visible rows and export the current report as CSV.</p>
+          <p className="panel-copy">Filter visible rows within the current report.</p>
         </div>
-        <button className="ghost-button slim report-download-button" type="button" onClick={downloadCsv} disabled={filteredRows.length === 0}>
-          Download CSV
-        </button>
       </div>
       <div className="report-toolbar">
         <div className="report-filter-row">
@@ -150,6 +297,14 @@ function DataCard({ title, columns, rows }) {
         <p className="report-filter-meta">
           Showing {filteredRows.length} of {rows.length} rows
         </p>
+        <button
+          className="ghost-button slim report-download-button"
+          type="button"
+          onClick={downloadCsv}
+          disabled={filteredRows.length === 0}
+        >
+          Download CSV
+        </button>
       </div>
       <div className="table-shell">
         <table>
@@ -198,7 +353,7 @@ function LoginView({ onLogin, loading, error }) {
         <AnimatedLogo />
         <h1>Inventory Control Center</h1>
         <p className="auth-copy">
-          Sign in to access the new React migration preview for the inbound inventory platform.
+          Sign in to access the inbound inventory platform.
         </p>
         <form className="auth-form" onSubmit={submit}>
           <label>
@@ -261,16 +416,6 @@ function DashboardView({ dashboard }) {
           ]}
         />
         <DataCard
-          title="Low Stock"
-          rows={dashboard?.low_stock ?? []}
-          columns={[
-            { key: "product_no", label: "Component No" },
-            { key: "product_name", label: "Component Name" },
-            { key: "quantity", label: "Qty" },
-            { key: "reorder_level", label: "Reorder" }
-          ]}
-        />
-        <DataCard
           title="Recent Purchases"
           rows={dashboard?.recent_purchases ?? []}
           columns={[
@@ -280,18 +425,70 @@ function DashboardView({ dashboard }) {
             { key: "purchase_date", label: "Date" }
           ]}
         />
-        <DataCard
-          title="Recent Sales"
-          rows={dashboard?.recent_sales ?? []}
-          columns={[
-            { key: "product_name", label: "Component" },
-            { key: "customer_name", label: "Customer" },
-            { key: "quantity_sold", label: "Qty" },
-            { key: "sale_date", label: "Date" }
-          ]}
-        />
       </section>
     </>
+  );
+}
+
+function FilePickerField({ label, accept, onChange, selectedFileName, previewUrl = "", previewAlt = "Selected file preview" }) {
+  const inputRef = useRef(null);
+
+  return (
+    <div className="full-span file-picker-field">
+      <span>{label}</span>
+      <div className="file-picker-shell">
+        <input
+          ref={inputRef}
+          className="file-picker-input"
+          type="file"
+          accept={accept}
+          onChange={(event) => onChange(event.target.files?.[0] ?? null)}
+        />
+        <button
+          className="ghost-button slim file-picker-button"
+          type="button"
+          onClick={() => inputRef.current?.click()}
+        >
+          Choose File
+        </button>
+        <span className="file-picker-name">{selectedFileName || "No file chosen"}</span>
+        {previewUrl ? (
+          <div className="file-picker-preview">
+            <img className="file-picker-preview-image" src={previewUrl} alt={previewAlt} />
+          </div>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+function NumberStepperField({ label, value, onChange, min = 0, step = 1, required = false, disabled = false }) {
+  const decimals = String(step).includes(".") ? String(step).split(".")[1].length : 0;
+
+  const adjustValue = (direction) => {
+    const currentValue = Number(value || 0);
+    const nextValue = Math.max(Number(min), currentValue + direction * Number(step));
+    onChange(nextValue.toFixed(decimals));
+  };
+
+  return (
+    <label>
+      {label}
+      <div className={`number-stepper ${disabled ? "disabled" : ""}`}>
+        <input
+          type="text"
+          inputMode={decimals > 0 ? "decimal" : "numeric"}
+          value={value}
+          onChange={(event) => onChange(event.target.value)}
+          required={required}
+          disabled={disabled}
+        />
+        <div className="number-stepper-actions">
+          <button type="button" className="number-stepper-button" onClick={() => adjustValue(1)} disabled={disabled}>+</button>
+          <button type="button" className="number-stepper-button" onClick={() => adjustValue(-1)} disabled={disabled}>-</button>
+        </div>
+      </div>
+    </label>
   );
 }
 
@@ -340,6 +537,16 @@ function ComponentForm({ suppliers, employees, selectedComponent, onSubmit, savi
     });
   };
 
+  const supplierOptions = suppliers.map((supplier) => ({
+    value: supplier.supplier_id,
+    label: supplier.supplier_name
+  }));
+
+  const employeeOptions = employees.map((employee) => ({
+    value: employee.full_name,
+    label: `${employee.full_name} (${employee.role})`
+  }));
+
   return (
     <section className="panel component-form-panel">
       <div className="panel-header split-header">
@@ -367,49 +574,50 @@ function ComponentForm({ suppliers, employees, selectedComponent, onSubmit, savi
             onChange={(event) => handleChange("category", event.target.value)}
           />
         </label>
-        <label>
-          Price
-          <input
-            type="number"
-            min="0"
-            step="0.01"
-            value={formState.price}
-            onChange={(event) => handleChange("price", event.target.value)}
-            required
-          />
-        </label>
-        <label>
-          Reorder Level
-          <input
-            type="number"
-            min="1"
-            step="1"
-            value={formState.reorder_level}
-            onChange={(event) => handleChange("reorder_level", event.target.value)}
-            required
-          />
-        </label>
+        <NumberStepperField
+          label="Price"
+          value={formState.price}
+          onChange={(nextValue) => handleChange("price", nextValue)}
+          min={0}
+          step={0.01}
+          required
+        />
+        <NumberStepperField
+          label="Reorder Level"
+          value={formState.reorder_level}
+          onChange={(nextValue) => handleChange("reorder_level", nextValue)}
+          min={1}
+          step={1}
+          required
+        />
         <label>
           Supplier
-          <select value={formState.supplier_id} onChange={(event) => handleChange("supplier_id", event.target.value)}>
-            {suppliers.map((supplier) => (
-              <option key={supplier.supplier_id} value={supplier.supplier_id}>{supplier.supplier_name}</option>
-            ))}
-          </select>
+          <SearchableSelect
+            options={supplierOptions}
+            value={formState.supplier_id}
+            onChange={(nextValue) => handleChange("supplier_id", nextValue)}
+            placeholder="Search supplier"
+          />
         </label>
         <label>
           Assigned To
-          <select value={formState.assigned_to} onChange={(event) => handleChange("assigned_to", event.target.value)}>
-            <option value="">Not Assigned</option>
-            {employees.map((employee) => (
-              <option key={employee.user_id} value={employee.full_name}>{employee.full_name} ({employee.role})</option>
-            ))}
-          </select>
+          <SearchableSelect
+            options={employeeOptions}
+            value={formState.assigned_to}
+            onChange={(nextValue) => handleChange("assigned_to", nextValue)}
+            placeholder="Search employee"
+            allowEmpty
+            emptyLabel="Not Assigned"
+          />
         </label>
-        <label className="full-span">
-          Product Image
-          <input type="file" accept="image/png,image/jpeg,image/jpg" onChange={(event) => setSelectedImageFile(event.target.files?.[0] ?? null)} />
-        </label>
+        <FilePickerField
+          label="Product Image"
+          accept="image/png,image/jpeg,image/jpg"
+          selectedFileName={selectedImageFile?.name}
+          onChange={setSelectedImageFile}
+          previewUrl={localPreviewUrl || selectedComponent?.image_url || ""}
+          previewAlt="Product image preview"
+        />
         {localPreviewUrl || selectedComponent?.image_url ? (
           <div className="full-span media-preview-shell">
             <img
@@ -429,7 +637,7 @@ function ComponentForm({ suppliers, employees, selectedComponent, onSubmit, savi
   );
 }
 
-function ComponentsView({ componentsPayload, onRefresh }) {
+function ComponentsView({ componentsPayload, onRefresh, onConfirm }) {
   const [selectedComponentId, setSelectedComponentId] = useState(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
@@ -442,6 +650,12 @@ function ComponentsView({ componentsPayload, onRefresh }) {
     () => items.find((item) => Number(item.product_id) === Number(selectedComponentId)) || null,
     [items, selectedComponentId]
   );
+
+  useEffect(() => {
+    if (selectedComponentId !== null) {
+      scrollPageToTop();
+    }
+  }, [selectedComponentId]);
 
   const submitComponent = async (payload) => {
     setSaving(true);
@@ -462,7 +676,12 @@ function ComponentsView({ componentsPayload, onRefresh }) {
   };
 
   const removeComponent = async (productId) => {
-    const confirmed = window.confirm("Deactivate this component?");
+    const confirmed = await onConfirm({
+      title: "Delete Component",
+      message: "Delete this component?",
+      confirmLabel: "Delete",
+      danger: true
+    });
     if (!confirmed) return;
     setError("");
     try {
@@ -537,7 +756,7 @@ function ComponentsView({ componentsPayload, onRefresh }) {
                   <td>
                     <div className="row-actions">
                       <button className="ghost-button slim" type="button" onClick={() => setSelectedComponentId(item.product_id)}>Edit</button>
-                      <button className="danger-button slim" type="button" onClick={() => removeComponent(item.product_id)}>Deactivate</button>
+                      <button className="danger-button slim" type="button" onClick={() => removeComponent(item.product_id)}>Delete</button>
                     </div>
                   </td>
                 </tr>
@@ -597,6 +816,16 @@ function PurchaseForm({ products, suppliers, selectedPurchase, onSubmit, saving,
     });
   };
 
+  const productOptions = products.map((product) => ({
+    value: product.product_id,
+    label: `${product.product_no} - ${product.product_name}`
+  }));
+
+  const supplierOptions = suppliers.map((supplier) => ({
+    value: supplier.supplier_id,
+    label: supplier.supplier_name
+  }));
+
   return (
     <section className="panel component-form-panel">
       <div className="panel-header split-header">
@@ -609,26 +838,31 @@ function PurchaseForm({ products, suppliers, selectedPurchase, onSubmit, saving,
       <form className="form-grid" onSubmit={submit}>
         <label>
           Component
-          <select value={formState.product_id} onChange={(event) => handleChange("product_id", event.target.value)} disabled={Boolean(selectedPurchase)}>
-            {products.map((product) => (
-              <option key={product.product_id} value={product.product_id}>
-                {product.product_no} - {product.product_name}
-              </option>
-            ))}
-          </select>
+          <SearchableSelect
+            options={productOptions}
+            value={formState.product_id}
+            onChange={(nextValue) => handleChange("product_id", nextValue)}
+            placeholder="Search component"
+            disabled={Boolean(selectedPurchase)}
+          />
         </label>
         <label>
           Supplier
-          <select value={formState.supplier_id} onChange={(event) => handleChange("supplier_id", event.target.value)}>
-            {suppliers.map((supplier) => (
-              <option key={supplier.supplier_id} value={supplier.supplier_id}>{supplier.supplier_name}</option>
-            ))}
-          </select>
+          <SearchableSelect
+            options={supplierOptions}
+            value={formState.supplier_id}
+            onChange={(nextValue) => handleChange("supplier_id", nextValue)}
+            placeholder="Search supplier"
+          />
         </label>
-        <label>
-          Quantity
-          <input type="number" min="1" step="1" value={formState.quantity} onChange={(event) => handleChange("quantity", event.target.value)} required />
-        </label>
+        <NumberStepperField
+          label="Quantity"
+          value={formState.quantity}
+          onChange={(nextValue) => handleChange("quantity", nextValue)}
+          min={1}
+          step={1}
+          required
+        />
         <label>
           Purchase Date
           <input type="date" value={formState.purchase_date} onChange={(event) => handleChange("purchase_date", event.target.value)} required />
@@ -641,10 +875,14 @@ function PurchaseForm({ products, suppliers, selectedPurchase, onSubmit, saving,
           Total Price
           <input value={formatCurrency(totalPrice)} disabled />
         </label>
-        <label className="full-span">
-          Purchase Invoice
-          <input type="file" accept="application/pdf,image/png,image/jpeg,image/jpg" onChange={(event) => setSelectedInvoiceFile(event.target.files?.[0] ?? null)} />
-        </label>
+        <FilePickerField
+          label="Purchase Invoice"
+          accept="application/pdf,image/png,image/jpeg,image/jpg"
+          selectedFileName={selectedInvoiceFile?.name}
+          onChange={setSelectedInvoiceFile}
+          previewUrl={localInvoicePreviewUrl || (selectedPurchase?.invoice_url && selectedPurchase.invoice_url.match(/\.(png|jpe?g)$/i) ? selectedPurchase.invoice_url : "")}
+          previewAlt="Purchase invoice preview"
+        />
         {selectedInvoiceFile && !selectedInvoiceFile.type.startsWith("image/") ? (
           <div className="full-span file-chip">{selectedInvoiceFile.name}</div>
         ) : null}
@@ -670,7 +908,7 @@ function PurchaseForm({ products, suppliers, selectedPurchase, onSubmit, saving,
   );
 }
 
-function PurchasesView({ purchasesPayload, onRefresh }) {
+function PurchasesView({ purchasesPayload, onRefresh, onConfirm }) {
   const [selectedPurchaseId, setSelectedPurchaseId] = useState(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
@@ -683,6 +921,12 @@ function PurchasesView({ purchasesPayload, onRefresh }) {
     () => items.find((item) => Number(item.purchase_id) === Number(selectedPurchaseId)) || null,
     [items, selectedPurchaseId]
   );
+
+  useEffect(() => {
+    if (selectedPurchaseId !== null) {
+      scrollPageToTop();
+    }
+  }, [selectedPurchaseId]);
 
   const submitPurchase = async (payload) => {
     setSaving(true);
@@ -703,7 +947,12 @@ function PurchasesView({ purchasesPayload, onRefresh }) {
   };
 
   const removePurchaseRecord = async (purchaseId) => {
-    const confirmed = window.confirm("Delete this purchase record?");
+    const confirmed = await onConfirm({
+      title: "Delete Purchase",
+      message: "Delete this purchase record?",
+      confirmLabel: "Delete",
+      danger: true
+    });
     if (!confirmed) return;
     setError("");
     try {
@@ -816,6 +1065,11 @@ function SaleForm({ products, selectedSale, onSubmit, saving, onCancel }) {
     });
   };
 
+  const productOptions = products.map((product) => ({
+    value: product.product_id,
+    label: `${product.product_no} - ${product.product_name}`
+  }));
+
   return (
     <section className="panel component-form-panel">
       <div className="panel-header split-header">
@@ -828,25 +1082,22 @@ function SaleForm({ products, selectedSale, onSubmit, saving, onCancel }) {
       <form className="form-grid" onSubmit={submit}>
         <label>
           Component
-          <select value={formState.product_id} onChange={(event) => handleChange("product_id", event.target.value)} disabled={Boolean(selectedSale)}>
-            {products.map((product) => (
-              <option key={product.product_id} value={product.product_id}>
-                {product.product_no} - {product.product_name}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label>
-          Quantity Sold
-          <input
-            type="number"
-            min="1"
-            step="1"
-            value={formState.quantity_sold}
-            onChange={(event) => handleChange("quantity_sold", event.target.value)}
-            required
+          <SearchableSelect
+            options={productOptions}
+            value={formState.product_id}
+            onChange={(nextValue) => handleChange("product_id", nextValue)}
+            placeholder="Search component"
+            disabled={Boolean(selectedSale)}
           />
         </label>
+        <NumberStepperField
+          label="Quantity Sold"
+          value={formState.quantity_sold}
+          onChange={(nextValue) => handleChange("quantity_sold", nextValue)}
+          min={1}
+          step={1}
+          required
+        />
         <label>
           Sale Date
           <input type="date" value={formState.sale_date} onChange={(event) => handleChange("sale_date", event.target.value)} required />
@@ -871,7 +1122,7 @@ function SaleForm({ products, selectedSale, onSubmit, saving, onCancel }) {
   );
 }
 
-function SalesView({ salesPayload, onRefresh }) {
+function SalesView({ salesPayload, onRefresh, onConfirm }) {
   const [selectedSaleId, setSelectedSaleId] = useState(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
@@ -883,6 +1134,12 @@ function SalesView({ salesPayload, onRefresh }) {
     () => items.find((item) => Number(item.sale_id) === Number(selectedSaleId)) || null,
     [items, selectedSaleId]
   );
+
+  useEffect(() => {
+    if (selectedSaleId !== null) {
+      scrollPageToTop();
+    }
+  }, [selectedSaleId]);
 
   const submitSale = async (payload) => {
     setSaving(true);
@@ -903,7 +1160,12 @@ function SalesView({ salesPayload, onRefresh }) {
   };
 
   const removeSaleRecord = async (saleId) => {
-    const confirmed = window.confirm("Delete this sale record?");
+    const confirmed = await onConfirm({
+      title: "Delete Sale",
+      message: "Delete this sale record?",
+      confirmLabel: "Delete",
+      danger: true
+    });
     if (!confirmed) return;
     setError("");
     try {
@@ -924,7 +1186,7 @@ function SalesView({ salesPayload, onRefresh }) {
           <p className="eyebrow">Sales Operations</p>
           <h1>Sales Module</h1>
           <p>
-            Track outbound component sales, customer context, and live stock impact from the React migration preview.
+            Track outbound component sales, customer context, and live stock impact.
           </p>
         </div>
       </header>
@@ -1013,6 +1275,11 @@ function NoteForm({ employees, selectedNote, currentUser, onSubmit, saving, onCa
     });
   };
 
+  const employeeOptions = employees.map((employee) => ({
+    value: employee.full_name,
+    label: `${employee.full_name} (${employee.role})`
+  }));
+
   return (
     <section className="panel component-form-panel">
       <div className="panel-header split-header">
@@ -1037,14 +1304,14 @@ function NoteForm({ employees, selectedNote, currentUser, onSubmit, saving, onCa
         </label>
         <label className="full-span">
           Assigned To
-          <select value={formState.assigned_to} onChange={(event) => handleChange("assigned_to", event.target.value)}>
-            <option value="">Not Assigned</option>
-            {employees.map((employee) => (
-              <option key={employee.user_id} value={employee.full_name}>
-                {employee.full_name} ({employee.role})
-              </option>
-            ))}
-          </select>
+          <SearchableSelect
+            options={employeeOptions}
+            value={formState.assigned_to}
+            onChange={(nextValue) => handleChange("assigned_to", nextValue)}
+            placeholder="Search employee"
+            allowEmpty
+            emptyLabel="Not Assigned"
+          />
         </label>
         <label className="full-span">
           Note Content
@@ -1063,7 +1330,7 @@ function NoteForm({ employees, selectedNote, currentUser, onSubmit, saving, onCa
   );
 }
 
-function NotesView({ notesPayload, currentUser, onRefresh }) {
+function NotesView({ notesPayload, currentUser, onRefresh, onConfirm }) {
   const [selectedNoteId, setSelectedNoteId] = useState(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
@@ -1075,6 +1342,12 @@ function NotesView({ notesPayload, currentUser, onRefresh }) {
     () => items.find((item) => Number(item.note_id) === Number(selectedNoteId)) || null,
     [items, selectedNoteId]
   );
+
+  useEffect(() => {
+    if (selectedNoteId !== null) {
+      scrollPageToTop();
+    }
+  }, [selectedNoteId]);
 
   const submitNote = async (payload) => {
     setSaving(true);
@@ -1100,7 +1373,12 @@ function NotesView({ notesPayload, currentUser, onRefresh }) {
   };
 
   const removeNoteRecord = async (noteId) => {
-    const confirmed = window.confirm("Delete this note?");
+    const confirmed = await onConfirm({
+      title: "Delete Note",
+      message: "Delete this note?",
+      confirmLabel: "Delete",
+      danger: true
+    });
     if (!confirmed) return;
     setError("");
     try {
@@ -1238,7 +1516,7 @@ function SupplierForm({ selectedSupplier, onSubmit, saving, onCancel }) {
   );
 }
 
-function SuppliersView({ suppliersPayload, onRefresh }) {
+function SuppliersView({ suppliersPayload, onRefresh, onConfirm }) {
   const [selectedSupplierId, setSelectedSupplierId] = useState(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
@@ -1248,6 +1526,12 @@ function SuppliersView({ suppliersPayload, onRefresh }) {
     () => items.find((item) => Number(item.supplier_id) === Number(selectedSupplierId)) || null,
     [items, selectedSupplierId]
   );
+
+  useEffect(() => {
+    if (selectedSupplierId !== null) {
+      scrollPageToTop();
+    }
+  }, [selectedSupplierId]);
 
   const submitSupplier = async (payload) => {
     setSaving(true);
@@ -1268,7 +1552,12 @@ function SuppliersView({ suppliersPayload, onRefresh }) {
   };
 
   const removeSupplierRecord = async (supplierId) => {
-    const confirmed = window.confirm("Delete this supplier?");
+    const confirmed = await onConfirm({
+      title: "Delete Supplier",
+      message: "Delete this supplier?",
+      confirmLabel: "Delete",
+      danger: true
+    });
     if (!confirmed) return;
     setError("");
     try {
@@ -1437,7 +1726,7 @@ function UserForm({ selectedUser, onSubmit, saving, onCancel }) {
   );
 }
 
-function UsersView({ usersPayload, currentUser, onRefresh }) {
+function UsersView({ usersPayload, currentUser, onRefresh, onConfirm }) {
   const [selectedUserId, setSelectedUserId] = useState(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
@@ -1447,6 +1736,12 @@ function UsersView({ usersPayload, currentUser, onRefresh }) {
     () => items.find((item) => Number(item.user_id) === Number(selectedUserId)) || null,
     [items, selectedUserId]
   );
+
+  useEffect(() => {
+    if (selectedUserId !== null) {
+      scrollPageToTop();
+    }
+  }, [selectedUserId]);
 
   const submitUser = async (payload) => {
     setSaving(true);
@@ -1475,7 +1770,12 @@ function UsersView({ usersPayload, currentUser, onRefresh }) {
       setError("Default admin cannot be deleted.");
       return;
     }
-    const confirmed = window.confirm("Delete this user?");
+    const confirmed = await onConfirm({
+      title: "Delete User",
+      message: "Delete this user?",
+      confirmLabel: "Delete",
+      danger: true
+    });
     if (!confirmed) return;
     setError("");
     try {
@@ -1585,6 +1885,16 @@ function AssignmentsView({ assignmentsPayload, onRefresh }) {
     }
   };
 
+  const productOptions = products.map((product) => ({
+    value: product.product_id,
+    label: `${product.product_no} - ${product.product_name}`
+  }));
+
+  const employeeOptions = employees.map((employee) => ({
+    value: employee.full_name,
+    label: `${employee.full_name} (${employee.role})`
+  }));
+
   return (
     <>
       <header className="hero compact-hero">
@@ -1605,23 +1915,21 @@ function AssignmentsView({ assignmentsPayload, onRefresh }) {
         <form className="form-grid" onSubmit={submitAssignment}>
           <label>
             Component
-            <select value={formState.product_id} onChange={(event) => handleChange("product_id", event.target.value)}>
-              {products.map((product) => (
-                <option key={product.product_id} value={product.product_id}>
-                  {product.product_no} - {product.product_name}
-                </option>
-              ))}
-            </select>
+            <SearchableSelect
+              options={productOptions}
+              value={formState.product_id}
+              onChange={(nextValue) => handleChange("product_id", nextValue)}
+              placeholder="Search component"
+            />
           </label>
           <label>
             Transfer To
-            <select value={formState.assigned_to} onChange={(event) => handleChange("assigned_to", event.target.value)}>
-              {employees.map((employee) => (
-                <option key={employee.user_id} value={employee.full_name}>
-                  {employee.full_name} ({employee.role})
-                </option>
-              ))}
-            </select>
+            <SearchableSelect
+              options={employeeOptions}
+              value={formState.assigned_to}
+              onChange={(nextValue) => handleChange("assigned_to", nextValue)}
+              placeholder="Search employee"
+            />
           </label>
           <label>
             Assignment Date
@@ -1789,7 +2097,7 @@ function ReportsView({ reportsPayload }) {
         <div className="panel-header split-header">
           <div>
             <h3>Select Report</h3>
-            <p className="panel-copy">Switch datasets to inspect the current shared-state records loaded from PostgreSQL.</p>
+            <p className="panel-copy">Switch between reports to review operational records across the platform.</p>
           </div>
         </div>
         <div className="report-tabs">
@@ -1916,6 +2224,44 @@ export default function App() {
   const [activeView, setActiveView] = useState("dashboard");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [confirmState, setConfirmState] = useState({
+    open: false,
+    title: "",
+    message: "",
+    confirmLabel: "Confirm",
+    cancelLabel: "Cancel",
+    danger: false,
+    resolve: null
+  });
+  const canAccessUsers = user?.role === "Admin";
+
+  const requestConfirm = ({ title, message, confirmLabel = "Confirm", cancelLabel = "Cancel", danger = false }) =>
+    new Promise((resolve) => {
+      setConfirmState({
+        open: true,
+        title,
+        message,
+        confirmLabel,
+        cancelLabel,
+        danger,
+        resolve
+      });
+    });
+
+  const closeConfirm = (result) => {
+    if (typeof confirmState.resolve === "function") {
+      confirmState.resolve(result);
+    }
+    setConfirmState({
+      open: false,
+      title: "",
+      message: "",
+      confirmLabel: "Confirm",
+      cancelLabel: "Cancel",
+      danger: false,
+      resolve: null
+    });
+  };
 
   const loadDashboard = async () => {
     const payload = await fetchDashboard();
@@ -1953,6 +2299,11 @@ export default function App() {
   };
 
   const loadUsers = async () => {
+    if (!canAccessUsers) {
+      setUsersPayload(null);
+      return;
+    }
+
     const payload = await fetchUsers();
     setUsersPayload(payload);
   };
@@ -1986,6 +2337,12 @@ export default function App() {
     };
   }, [user]);
 
+  useEffect(() => {
+    if (!canAccessUsers && activeView === "users") {
+      setActiveView("dashboard");
+    }
+  }, [activeView, canAccessUsers]);
+
   const handleLogin = async (username, password) => {
     setLoading(true);
     setError("");
@@ -2018,7 +2375,7 @@ export default function App() {
           <button className={`nav-item ${activeView === "purchases" ? "active" : ""}`} onClick={() => setActiveView("purchases")}>Purchases</button>
           <button className={`nav-item ${activeView === "sales" ? "active" : ""}`} onClick={() => setActiveView("sales")}>Sales</button>
           <button className={`nav-item ${activeView === "notes" ? "active" : ""}`} onClick={() => setActiveView("notes")}>Notes</button>
-          <button className={`nav-item ${activeView === "users" ? "active" : ""}`} onClick={() => setActiveView("users")}>Users</button>
+          {canAccessUsers ? <button className={`nav-item ${activeView === "users" ? "active" : ""}`} onClick={() => setActiveView("users")}>Users</button> : null}
           <button className={`nav-item ${activeView === "reports" ? "active" : ""}`} onClick={() => setActiveView("reports")}>Reports</button>
         </nav>
         <div className="sidebar-user">
@@ -2046,15 +2403,25 @@ export default function App() {
       <section className="content">
         {error ? <div className="error-banner inline-banner">{error}</div> : null}
         {activeView === "dashboard" ? <DashboardView dashboard={dashboard} /> : null}
-        {activeView === "suppliers" ? <SuppliersView suppliersPayload={suppliersPayload} onRefresh={refreshOperationalData} /> : null}
-        {activeView === "components" ? <ComponentsView componentsPayload={componentsPayload} onRefresh={refreshOperationalData} /> : null}
+        {activeView === "suppliers" ? <SuppliersView suppliersPayload={suppliersPayload} onRefresh={refreshOperationalData} onConfirm={requestConfirm} /> : null}
+        {activeView === "components" ? <ComponentsView componentsPayload={componentsPayload} onRefresh={refreshOperationalData} onConfirm={requestConfirm} /> : null}
         {activeView === "assignments" ? <AssignmentsView assignmentsPayload={assignmentsPayload} onRefresh={refreshOperationalData} /> : null}
-        {activeView === "purchases" ? <PurchasesView purchasesPayload={purchasesPayload} onRefresh={refreshOperationalData} /> : null}
-        {activeView === "sales" ? <SalesView salesPayload={salesPayload} onRefresh={refreshOperationalData} /> : null}
-        {activeView === "notes" ? <NotesView notesPayload={notesPayload} currentUser={user} onRefresh={refreshOperationalData} /> : null}
-        {activeView === "users" ? <UsersView usersPayload={usersPayload} currentUser={user} onRefresh={refreshOperationalData} /> : null}
+        {activeView === "purchases" ? <PurchasesView purchasesPayload={purchasesPayload} onRefresh={refreshOperationalData} onConfirm={requestConfirm} /> : null}
+        {activeView === "sales" ? <SalesView salesPayload={salesPayload} onRefresh={refreshOperationalData} onConfirm={requestConfirm} /> : null}
+        {activeView === "notes" ? <NotesView notesPayload={notesPayload} currentUser={user} onRefresh={refreshOperationalData} onConfirm={requestConfirm} /> : null}
+        {activeView === "users" && canAccessUsers ? <UsersView usersPayload={usersPayload} currentUser={user} onRefresh={refreshOperationalData} onConfirm={requestConfirm} /> : null}
         {activeView === "reports" ? <ReportsView reportsPayload={reportsPayload} /> : null}
       </section>
+      <ConfirmDialog
+        open={confirmState.open}
+        title={confirmState.title}
+        message={confirmState.message}
+        confirmLabel={confirmState.confirmLabel}
+        cancelLabel={confirmState.cancelLabel}
+        danger={confirmState.danger}
+        onConfirm={() => closeConfirm(true)}
+        onCancel={() => closeConfirm(false)}
+      />
     </main>
   );
 }
