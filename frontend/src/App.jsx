@@ -1,6 +1,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
+  clearAuthSession,
   createComponent,
   createAssignment,
   createNote,
@@ -23,7 +24,9 @@ import {
   fetchSuppliers,
   fetchUsers,
   fetchReports,
+  getStoredAuthSession,
   login,
+  saveAuthSession,
   uploadProductImage,
   uploadPurchaseInvoice,
   updateNote,
@@ -2390,7 +2393,7 @@ function formatCurrency(value) {
 }
 
 export default function App() {
-  const [user, setUser] = useState(null);
+  const [user, setUser] = useState(() => getStoredAuthSession());
   const [dashboard, setDashboard] = useState(null);
   const [suppliersPayload, setSuppliersPayload] = useState(null);
   const [componentsPayload, setComponentsPayload] = useState(null);
@@ -2507,6 +2510,9 @@ export default function App() {
         await refreshOperationalData();
       } catch (dataError) {
         if (!cancelled) {
+          if (dataError.message.includes("session expired")) {
+            setUser(null);
+          }
           setError(dataError.message);
         }
       }
@@ -2529,6 +2535,7 @@ export default function App() {
     setError("");
     try {
       const payload = await login(username, password);
+      saveAuthSession(payload);
       setUser(payload);
     } catch (loginError) {
       setError(loginError.message);
@@ -2576,6 +2583,7 @@ export default function App() {
             <span>{user.role}</span>
           </div>
           <button className="ghost-button" onClick={() => {
+            clearAuthSession();
             setUser(null);
             setDashboard(null);
             setSuppliersPayload(null);

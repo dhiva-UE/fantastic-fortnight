@@ -15,6 +15,11 @@ class UserSummary(BaseModel):
     permissions: dict[str, int]
 
 
+class AuthResponse(UserSummary):
+    access_token: str
+    token_type: str = "bearer"
+
+
 class DashboardMetrics(BaseModel):
     total_components: int
     total_suppliers: int

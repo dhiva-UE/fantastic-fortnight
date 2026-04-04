@@ -1,430 +1,294 @@
-const headers = {
+const JSON_HEADERS = {
   "Content-Type": "application/json"
 };
+
+const AUTH_STORAGE_KEY = "inventory_auth";
+
+function getApiBaseUrl() {
+  return (import.meta.env.VITE_API_BASE_URL || "").replace(/\/$/, "");
+}
+
+function buildApiUrl(path) {
+  return `${getApiBaseUrl()}${path}`;
+}
+
+function readStoredAuthSession() {
+  if (typeof window === "undefined") {
+    return null;
+  }
+
+  try {
+    const rawValue = window.localStorage.getItem(AUTH_STORAGE_KEY);
+    if (!rawValue) {
+      return null;
+    }
+    return JSON.parse(rawValue);
+  } catch {
+    return null;
+  }
+}
+
+let authSession = readStoredAuthSession();
+
+export function getStoredAuthSession() {
+  return authSession;
+}
+
+export function saveAuthSession(session) {
+  authSession = session;
+  if (typeof window !== "undefined") {
+    window.localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(session));
+  }
+}
+
+export function clearAuthSession() {
+  authSession = null;
+  if (typeof window !== "undefined") {
+    window.localStorage.removeItem(AUTH_STORAGE_KEY);
+  }
+}
+
+function withAuthorizationHeader(headers = {}) {
+  if (!authSession?.access_token) {
+    return headers;
+  }
+
+  return {
+    ...headers,
+    Authorization: `Bearer ${authSession.access_token}`
+  };
+}
+
+function appendAccessToken(url) {
+  if (!url || !authSession?.access_token || /^blob:/i.test(url)) {
+    return url;
+  }
+
+  try {
+    const resolvedUrl = new URL(url, window.location.origin);
+    resolvedUrl.searchParams.set("access_token", authSession.access_token);
+
+    if (!getApiBaseUrl() && resolvedUrl.origin === window.location.origin) {
+      return `${resolvedUrl.pathname}${resolvedUrl.search}`;
+    }
+
+    return resolvedUrl.toString();
+  } catch {
+    return url;
+  }
+}
+
+function enrichMediaUrls(value) {
+  if (Array.isArray(value)) {
+    return value.map(enrichMediaUrls);
+  }
+
+  if (!value || typeof value !== "object") {
+    return value;
+  }
+
+  const nextValue = {};
+  for (const [key, nestedValue] of Object.entries(value)) {
+    if (key === "image_url" || key === "invoice_url" || key === "public_url") {
+      nextValue[key] = appendAccessToken(nestedValue);
+    } else {
+      nextValue[key] = enrichMediaUrls(nestedValue);
+    }
+  }
+
+  return nextValue;
+}
 
 async function parseApiError(response, fallbackMessage) {
   const payload = await response.json().catch(() => ({}));
   return payload.detail || fallbackMessage;
 }
 
-export async function login(username, password) {
+async function apiRequest(
+  path,
+  {
+    method = "GET",
+    body,
+    isFormData = false,
+    fallbackMessage = "Request failed",
+    clearSessionOnUnauthorized = true
+  } = {}
+) {
+  const requestHeaders = isFormData ? withAuthorizationHeader() : withAuthorizationHeader(JSON_HEADERS);
   let response;
+
   try {
-    response = await fetch("/api/auth/login", {
-      method: "POST",
-      headers,
-      body: JSON.stringify({ username, password })
+    response = await fetch(buildApiUrl(path), {
+      method,
+      headers: requestHeaders,
+      body: isFormData ? body : body ? JSON.stringify(body) : undefined
     });
   } catch {
-    throw new Error("Cannot reach the API server. Make sure FastAPI is running on port 8000.");
+    throw new Error("Cannot reach the API server. Make sure the backend is running and reachable.");
   }
 
   if (!response.ok) {
-    throw new Error(await parseApiError(response, "Login failed"));
+    if (response.status === 401 && clearSessionOnUnauthorized) {
+      clearAuthSession();
+      throw new Error("Your session expired. Please sign in again.");
+    }
+
+    throw new Error(await parseApiError(response, fallbackMessage));
   }
 
-  return response.json();
+  if (response.status === 204) {
+    return null;
+  }
+
+  const payload = await response.json();
+  return enrichMediaUrls(payload);
+}
+
+export async function login(username, password) {
+  const payload = await apiRequest("/api/auth/login", {
+    method: "POST",
+    body: { username, password },
+    fallbackMessage: "Login failed",
+    clearSessionOnUnauthorized: false
+  });
+  saveAuthSession(payload);
+  return payload;
+}
+
+export function withAuthenticatedMediaUrl(url) {
+  return appendAccessToken(url);
 }
 
 export async function fetchDashboard() {
-  let response;
-  try {
-    response = await fetch("/api/dashboard");
-  } catch {
-    throw new Error("Cannot reach the API server. Make sure FastAPI is running on port 8000.");
-  }
-  if (!response.ok) {
-    throw new Error("Failed to load dashboard");
-  }
-  return response.json();
+  return apiRequest("/api/dashboard", { fallbackMessage: "Failed to load dashboard" });
 }
 
 export async function fetchComponents() {
-  let response;
-  try {
-    response = await fetch("/api/components");
-  } catch {
-    throw new Error("Cannot reach the API server. Make sure FastAPI is running on port 8000.");
-  }
-  if (!response.ok) {
-    throw new Error("Failed to load components");
-  }
-  return response.json();
+  return apiRequest("/api/components", { fallbackMessage: "Failed to load components" });
 }
 
 export async function fetchSuppliers() {
-  let response;
-  try {
-    response = await fetch("/api/suppliers");
-  } catch {
-    throw new Error("Cannot reach the API server. Make sure FastAPI is running on port 8000.");
-  }
-  if (!response.ok) {
-    throw new Error("Failed to load suppliers");
-  }
-  return response.json();
+  return apiRequest("/api/suppliers", { fallbackMessage: "Failed to load suppliers" });
 }
 
 export async function uploadProductImage(file) {
   const formData = new FormData();
   formData.append("file", file);
-
-  const response = await fetch("/api/uploads/product-image", {
+  return apiRequest("/api/uploads/product-image", {
     method: "POST",
-    body: formData
+    body: formData,
+    isFormData: true,
+    fallbackMessage: "Failed to upload product image"
   });
-
-  if (!response.ok) {
-    throw new Error(await parseApiError(response, "Failed to upload product image"));
-  }
-
-  return response.json();
 }
 
 export async function uploadPurchaseInvoice(file) {
   const formData = new FormData();
   formData.append("file", file);
-
-  const response = await fetch("/api/uploads/purchase-invoice", {
+  return apiRequest("/api/uploads/purchase-invoice", {
     method: "POST",
-    body: formData
+    body: formData,
+    isFormData: true,
+    fallbackMessage: "Failed to upload purchase invoice"
   });
-
-  if (!response.ok) {
-    throw new Error(await parseApiError(response, "Failed to upload purchase invoice"));
-  }
-
-  return response.json();
 }
 
 export async function createSupplier(payload) {
-  const response = await fetch("/api/suppliers", {
-    method: "POST",
-    headers,
-    body: JSON.stringify(payload)
-  });
-
-  if (!response.ok) {
-    throw new Error(await parseApiError(response, "Failed to create supplier"));
-  }
-
-  return response.json();
+  return apiRequest("/api/suppliers", { method: "POST", body: payload, fallbackMessage: "Failed to create supplier" });
 }
 
 export async function updateSupplier(supplierId, payload) {
-  const response = await fetch(`/api/suppliers/${supplierId}`, {
-    method: "PUT",
-    headers,
-    body: JSON.stringify(payload)
-  });
-
-  if (!response.ok) {
-    throw new Error(await parseApiError(response, "Failed to update supplier"));
-  }
-
-  return response.json();
+  return apiRequest(`/api/suppliers/${supplierId}`, { method: "PUT", body: payload, fallbackMessage: "Failed to update supplier" });
 }
 
 export async function deleteSupplier(supplierId) {
-  const response = await fetch(`/api/suppliers/${supplierId}`, {
-    method: "DELETE"
-  });
-
-  if (!response.ok) {
-    throw new Error(await parseApiError(response, "Failed to delete supplier"));
-  }
-
-  return response.json();
+  return apiRequest(`/api/suppliers/${supplierId}`, { method: "DELETE", fallbackMessage: "Failed to delete supplier" });
 }
 
 export async function fetchAssignments() {
-  let response;
-  try {
-    response = await fetch("/api/assignments");
-  } catch {
-    throw new Error("Cannot reach the API server. Make sure FastAPI is running on port 8000.");
-  }
-  if (!response.ok) {
-    throw new Error("Failed to load assignments");
-  }
-  return response.json();
+  return apiRequest("/api/assignments", { fallbackMessage: "Failed to load assignments" });
 }
 
 export async function createAssignment(payload) {
-  const response = await fetch("/api/assignments", {
-    method: "POST",
-    headers,
-    body: JSON.stringify(payload)
-  });
-
-  if (!response.ok) {
-    throw new Error(await parseApiError(response, "Failed to update responsibility"));
-  }
-
-  return response.json();
+  return apiRequest("/api/assignments", { method: "POST", body: payload, fallbackMessage: "Failed to update responsibility" });
 }
 
 export async function createComponent(payload) {
-  const response = await fetch("/api/components", {
-    method: "POST",
-    headers,
-    body: JSON.stringify(payload)
-  });
-
-  if (!response.ok) {
-    throw new Error(await parseApiError(response, "Failed to create component"));
-  }
-
-  return response.json();
+  return apiRequest("/api/components", { method: "POST", body: payload, fallbackMessage: "Failed to create component" });
 }
 
 export async function updateComponent(productId, payload) {
-  const response = await fetch(`/api/components/${productId}`, {
-    method: "PUT",
-    headers,
-    body: JSON.stringify(payload)
-  });
-
-  if (!response.ok) {
-    throw new Error(await parseApiError(response, "Failed to update component"));
-  }
-
-  return response.json();
+  return apiRequest(`/api/components/${productId}`, { method: "PUT", body: payload, fallbackMessage: "Failed to update component" });
 }
 
 export async function deleteComponent(productId) {
-  const response = await fetch(`/api/components/${productId}`, {
-    method: "DELETE"
-  });
-
-  if (!response.ok) {
-    throw new Error(await parseApiError(response, "Failed to delete component"));
-  }
-
-  return response.json();
+  return apiRequest(`/api/components/${productId}`, { method: "DELETE", fallbackMessage: "Failed to delete component" });
 }
 
 export async function fetchPurchases() {
-  let response;
-  try {
-    response = await fetch("/api/purchases");
-  } catch {
-    throw new Error("Cannot reach the API server. Make sure FastAPI is running on port 8000.");
-  }
-  if (!response.ok) {
-    throw new Error("Failed to load purchases");
-  }
-  return response.json();
+  return apiRequest("/api/purchases", { fallbackMessage: "Failed to load purchases" });
 }
 
 export async function createPurchase(payload) {
-  const response = await fetch("/api/purchases", {
-    method: "POST",
-    headers,
-    body: JSON.stringify(payload)
-  });
-
-  if (!response.ok) {
-    throw new Error(await parseApiError(response, "Failed to create purchase"));
-  }
-
-  return response.json();
+  return apiRequest("/api/purchases", { method: "POST", body: payload, fallbackMessage: "Failed to create purchase" });
 }
 
 export async function updatePurchase(purchaseId, payload) {
-  const response = await fetch(`/api/purchases/${purchaseId}`, {
-    method: "PUT",
-    headers,
-    body: JSON.stringify(payload)
-  });
-
-  if (!response.ok) {
-    throw new Error(await parseApiError(response, "Failed to update purchase"));
-  }
-
-  return response.json();
+  return apiRequest(`/api/purchases/${purchaseId}`, { method: "PUT", body: payload, fallbackMessage: "Failed to update purchase" });
 }
 
 export async function deletePurchase(purchaseId) {
-  const response = await fetch(`/api/purchases/${purchaseId}`, {
-    method: "DELETE"
-  });
-
-  if (!response.ok) {
-    throw new Error(await parseApiError(response, "Failed to delete purchase"));
-  }
-
-  return response.json();
+  return apiRequest(`/api/purchases/${purchaseId}`, { method: "DELETE", fallbackMessage: "Failed to delete purchase" });
 }
 
 export async function fetchSales() {
-  let response;
-  try {
-    response = await fetch("/api/sales");
-  } catch {
-    throw new Error("Cannot reach the API server. Make sure FastAPI is running on port 8000.");
-  }
-  if (!response.ok) {
-    throw new Error("Failed to load sales");
-  }
-  return response.json();
+  return apiRequest("/api/sales", { fallbackMessage: "Failed to load sales" });
 }
 
 export async function createSale(payload) {
-  const response = await fetch("/api/sales", {
-    method: "POST",
-    headers,
-    body: JSON.stringify(payload)
-  });
-
-  if (!response.ok) {
-    throw new Error(await parseApiError(response, "Failed to create sale"));
-  }
-
-  return response.json();
+  return apiRequest("/api/sales", { method: "POST", body: payload, fallbackMessage: "Failed to create sale" });
 }
 
 export async function updateSale(saleId, payload) {
-  const response = await fetch(`/api/sales/${saleId}`, {
-    method: "PUT",
-    headers,
-    body: JSON.stringify(payload)
-  });
-
-  if (!response.ok) {
-    throw new Error(await parseApiError(response, "Failed to update sale"));
-  }
-
-  return response.json();
+  return apiRequest(`/api/sales/${saleId}`, { method: "PUT", body: payload, fallbackMessage: "Failed to update sale" });
 }
 
 export async function deleteSale(saleId) {
-  const response = await fetch(`/api/sales/${saleId}`, {
-    method: "DELETE"
-  });
-
-  if (!response.ok) {
-    throw new Error(await parseApiError(response, "Failed to delete sale"));
-  }
-
-  return response.json();
+  return apiRequest(`/api/sales/${saleId}`, { method: "DELETE", fallbackMessage: "Failed to delete sale" });
 }
 
 export async function fetchNotes() {
-  let response;
-  try {
-    response = await fetch("/api/notes");
-  } catch {
-    throw new Error("Cannot reach the API server. Make sure FastAPI is running on port 8000.");
-  }
-  if (!response.ok) {
-    throw new Error("Failed to load notes");
-  }
-  return response.json();
+  return apiRequest("/api/notes", { fallbackMessage: "Failed to load notes" });
 }
 
 export async function fetchUsers() {
-  let response;
-  try {
-    response = await fetch("/api/users");
-  } catch {
-    throw new Error("Cannot reach the API server. Make sure FastAPI is running on port 8000.");
-  }
-  if (!response.ok) {
-    throw new Error("Failed to load users");
-  }
-  return response.json();
+  return apiRequest("/api/users", { fallbackMessage: "Failed to load users" });
 }
 
 export async function createUser(payload) {
-  const response = await fetch("/api/users", {
-    method: "POST",
-    headers,
-    body: JSON.stringify(payload)
-  });
-
-  if (!response.ok) {
-    throw new Error(await parseApiError(response, "Failed to create user"));
-  }
-
-  return response.json();
+  return apiRequest("/api/users", { method: "POST", body: payload, fallbackMessage: "Failed to create user" });
 }
 
 export async function updateUser(userId, payload) {
-  const response = await fetch(`/api/users/${userId}`, {
-    method: "PUT",
-    headers,
-    body: JSON.stringify(payload)
-  });
-
-  if (!response.ok) {
-    throw new Error(await parseApiError(response, "Failed to update user"));
-  }
-
-  return response.json();
+  return apiRequest(`/api/users/${userId}`, { method: "PUT", body: payload, fallbackMessage: "Failed to update user" });
 }
 
 export async function deleteUser(userId) {
-  const response = await fetch(`/api/users/${userId}`, {
-    method: "DELETE"
-  });
-
-  if (!response.ok) {
-    throw new Error(await parseApiError(response, "Failed to delete user"));
-  }
-
-  return response.json();
+  return apiRequest(`/api/users/${userId}`, { method: "DELETE", fallbackMessage: "Failed to delete user" });
 }
 
 export async function fetchReports() {
-  let response;
-  try {
-    response = await fetch("/api/reports");
-  } catch {
-    throw new Error("Cannot reach the API server. Make sure FastAPI is running on port 8000.");
-  }
-  if (!response.ok) {
-    throw new Error("Failed to load reports");
-  }
-  return response.json();
+  return apiRequest("/api/reports", { fallbackMessage: "Failed to load reports" });
 }
 
 export async function createNote(payload) {
-  const response = await fetch("/api/notes", {
-    method: "POST",
-    headers,
-    body: JSON.stringify(payload)
-  });
-
-  if (!response.ok) {
-    throw new Error(await parseApiError(response, "Failed to create note"));
-  }
-
-  return response.json();
+  return apiRequest("/api/notes", { method: "POST", body: payload, fallbackMessage: "Failed to create note" });
 }
 
 export async function updateNote(noteId, payload) {
-  const response = await fetch(`/api/notes/${noteId}`, {
-    method: "PUT",
-    headers,
-    body: JSON.stringify(payload)
-  });
-
-  if (!response.ok) {
-    throw new Error(await parseApiError(response, "Failed to update note"));
-  }
-
-  return response.json();
+  return apiRequest(`/api/notes/${noteId}`, { method: "PUT", body: payload, fallbackMessage: "Failed to update note" });
 }
 
 export async function deleteNote(noteId) {
-  const response = await fetch(`/api/notes/${noteId}`, {
-    method: "DELETE"
-  });
-
-  if (!response.ok) {
-    throw new Error(await parseApiError(response, "Failed to delete note"));
-  }
-
-  return response.json();
+  return apiRequest(`/api/notes/${noteId}`, { method: "DELETE", fallbackMessage: "Failed to delete note" });
 }

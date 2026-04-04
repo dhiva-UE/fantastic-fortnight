@@ -1,12 +1,19 @@
+import sys
+import base64
+import binascii
+import hashlib
+import hmac
+import json
 import os
 import re
+import time
 import uuid
 from pathlib import Path
-import sys
 
-from fastapi import FastAPI, File, HTTPException, UploadFile
+from fastapi import Depends, FastAPI, File, HTTPException, Query, UploadFile, status
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
 if str(ROOT_DIR) not in sys.path:
@@ -36,6 +43,7 @@ from database import (  # noqa: E402
     get_sales,
     get_supplier_dropdown,
     get_suppliers,
+    get_user_by_id,
     get_user_dropdown,
     get_users,
     login_user,
@@ -49,6 +57,7 @@ from database import (  # noqa: E402
 )
 try:
     from backend.schemas import (  # noqa: E402
+        AuthResponse,
         AssignmentCreateRequest,
         AssignmentListResponse,
         ComponentCreateRequest,
@@ -80,6 +89,7 @@ try:
     )
 except ModuleNotFoundError:
     from schemas import (  # noqa: E402
+        AuthResponse,
         AssignmentCreateRequest,
         AssignmentListResponse,
         ComponentCreateRequest,
@@ -108,7 +118,57 @@ except ModuleNotFoundError:
         UserListResponse,
         UserSummary,
         UserUpdateRequest,
-    )
+)
+
+APP_ENV = os.getenv("APP_ENV", "development").strip().lower()
+DEFAULT_DEV_CORS_ORIGINS = [
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+    "http://localhost:4173",
+    "http://127.0.0.1:4173",
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+]
+PRODUCT_IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp"}
+PRODUCT_IMAGE_CONTENT_TYPES = {"image/png", "image/jpeg", "image/webp"}
+PURCHASE_INVOICE_EXTENSIONS = {".pdf", ".png", ".jpg", ".jpeg", ".webp"}
+PURCHASE_INVOICE_CONTENT_TYPES = {"application/pdf", "image/png", "image/jpeg", "image/webp"}
+
+
+def parse_csv_env(name: str) -> list[str]:
+    raw_value = os.getenv(name, "")
+    return [item.strip() for item in raw_value.split(",") if item.strip()]
+
+
+def read_int_env(name: str, default: int) -> int:
+    raw_value = os.getenv(name, "").strip()
+    if not raw_value:
+        return default
+    try:
+        return int(raw_value)
+    except ValueError as error:
+        raise RuntimeError(f"{name} must be an integer.") from error
+
+
+CORS_ORIGINS = parse_csv_env("CORS_ORIGINS")
+if not CORS_ORIGINS and APP_ENV == "development":
+    CORS_ORIGINS = DEFAULT_DEV_CORS_ORIGINS
+
+AUTH_SECRET_KEY = os.getenv("AUTH_SECRET_KEY", "").strip()
+AUTH_TOKEN_TTL_MINUTES = read_int_env("AUTH_TOKEN_TTL_MINUTES", 480)
+MAX_UPLOAD_BYTES = read_int_env("MAX_UPLOAD_BYTES", 5 * 1024 * 1024)
+
+if AUTH_TOKEN_TTL_MINUTES <= 0:
+    raise RuntimeError("AUTH_TOKEN_TTL_MINUTES must be greater than zero.")
+
+if MAX_UPLOAD_BYTES <= 0:
+    raise RuntimeError("MAX_UPLOAD_BYTES must be greater than zero.")
+
+if APP_ENV in {"production", "staging"} and (not AUTH_SECRET_KEY or AUTH_SECRET_KEY == "change_me"):
+    raise RuntimeError("Set a strong AUTH_SECRET_KEY before starting the API in production.")
+
+if not AUTH_SECRET_KEY:
+    AUTH_SECRET_KEY = "dev-insecure-key-change-me"
 
 app = FastAPI(
     title="Inbound Inventory API",
@@ -118,13 +178,14 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
+    allow_origins=CORS_ORIGINS,
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
 create_tables()
+bearer_scheme = HTTPBearer(auto_error=False)
 
 
 def get_storage_dir(env_var_name: str, default_folder_name: str) -> Path:
@@ -143,24 +204,175 @@ def get_storage_dir(env_var_name: str, default_folder_name: str) -> Path:
 PRODUCT_IMAGES_DIR = get_storage_dir("PRODUCT_IMAGES_DIR", "product_images")
 PURCHASE_INVOICES_DIR = get_storage_dir("PURCHASE_INVOICES_DIR", "purchase_invoices")
 
-app.mount("/media/product-images", StaticFiles(directory=str(PRODUCT_IMAGES_DIR)), name="product-images")
-app.mount("/media/purchase-invoices", StaticFiles(directory=str(PURCHASE_INVOICES_DIR)), name="purchase-invoices")
-
-
 def sanitize_filename(filename: str) -> str:
     cleaned = re.sub(r"[^A-Za-z0-9._-]", "_", filename)
     return cleaned or "file"
 
 
-def save_upload_file(upload_file: UploadFile, target_dir: Path) -> tuple[str, str]:
+def encode_token_segment(value: bytes) -> str:
+    return base64.urlsafe_b64encode(value).rstrip(b"=").decode("ascii")
+
+
+def decode_token_segment(value: str) -> bytes:
+    padding = "=" * (-len(value) % 4)
+    return base64.urlsafe_b64decode(f"{value}{padding}")
+
+
+def create_access_token(user_id: int) -> str:
+    payload = {
+        "sub": str(user_id),
+        "exp": int(time.time()) + (AUTH_TOKEN_TTL_MINUTES * 60),
+    }
+    payload_segment = encode_token_segment(
+        json.dumps(payload, separators=(",", ":"), sort_keys=True).encode("utf-8")
+    )
+    signature = hmac.new(
+        AUTH_SECRET_KEY.encode("utf-8"),
+        payload_segment.encode("utf-8"),
+        hashlib.sha256,
+    ).digest()
+    return f"{payload_segment}.{encode_token_segment(signature)}"
+
+
+def decode_access_token(token: str) -> dict[str, str | int]:
+    try:
+        payload_segment, signature_segment = token.split(".", 1)
+        expected_signature = hmac.new(
+            AUTH_SECRET_KEY.encode("utf-8"),
+            payload_segment.encode("utf-8"),
+            hashlib.sha256,
+        ).digest()
+        actual_signature = decode_token_segment(signature_segment)
+        if not hmac.compare_digest(actual_signature, expected_signature):
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid access token")
+
+        payload = json.loads(decode_token_segment(payload_segment).decode("utf-8"))
+    except (ValueError, binascii.Error, json.JSONDecodeError):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid access token")
+
+    if int(payload.get("exp", 0)) <= int(time.time()):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Access token has expired")
+
+    return payload
+
+
+def build_user_summary(user_record) -> UserSummary:
+    return UserSummary(
+        user_id=int(user_record[0]),
+        full_name=str(user_record[1]),
+        username=str(user_record[2]),
+        role=str(user_record[3]),
+        department=user_record[4],
+        permissions={
+            "can_edit_suppliers": int(user_record[9]),
+            "can_delete_suppliers": int(user_record[10]),
+            "can_edit_products": int(user_record[11]),
+            "can_delete_products": int(user_record[12]),
+            "can_edit_purchases": int(user_record[13]),
+            "can_delete_purchases": int(user_record[14]),
+        },
+    )
+
+
+def get_current_user(
+    credentials: HTTPAuthorizationCredentials | None = Depends(bearer_scheme),
+    access_token: str | None = Query(default=None),
+) -> UserSummary:
+    token = credentials.credentials if credentials else access_token
+    if not token:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentication required")
+
+    payload = decode_access_token(token)
+    try:
+        user_id = int(payload.get("sub", 0))
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid access token")
+
+    user_record = get_user_by_id(user_id)
+    if not user_record:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User account no longer exists")
+
+    return build_user_summary(user_record)
+
+
+def require_admin(current_user: UserSummary = Depends(get_current_user)) -> UserSummary:
+    if current_user.role != "Admin":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin access required")
+    return current_user
+
+
+def require_permission(permission_name: str, current_user: UserSummary) -> UserSummary:
+    if current_user.role == "Admin" or int(current_user.permissions.get(permission_name, 0)) == 1:
+        return current_user
+    raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="You do not have permission for this action")
+
+
+def require_supplier_edit(current_user: UserSummary = Depends(get_current_user)) -> UserSummary:
+    return require_permission("can_edit_suppliers", current_user)
+
+
+def require_supplier_delete(current_user: UserSummary = Depends(get_current_user)) -> UserSummary:
+    return require_permission("can_delete_suppliers", current_user)
+
+
+def require_product_edit(current_user: UserSummary = Depends(get_current_user)) -> UserSummary:
+    return require_permission("can_edit_products", current_user)
+
+
+def require_product_delete(current_user: UserSummary = Depends(get_current_user)) -> UserSummary:
+    return require_permission("can_delete_products", current_user)
+
+
+def require_purchase_edit(current_user: UserSummary = Depends(get_current_user)) -> UserSummary:
+    return require_permission("can_edit_purchases", current_user)
+
+
+def require_purchase_delete(current_user: UserSummary = Depends(get_current_user)) -> UserSummary:
+    return require_permission("can_delete_purchases", current_user)
+
+
+def resolve_media_file(base_dir: Path, relative_path: str) -> Path:
+    candidate = (base_dir / relative_path).resolve()
+    base_path = base_dir.resolve()
+    try:
+        candidate.relative_to(base_path)
+    except ValueError as error:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found") from error
+
+    if not candidate.is_file():
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")
+
+    return candidate
+
+
+def save_upload_file(
+    upload_file: UploadFile,
+    target_dir: Path,
+    allowed_extensions: set[str],
+    allowed_content_types: set[str],
+) -> tuple[str, str]:
     original_name = sanitize_filename(upload_file.filename or "file")
-    suffix = Path(original_name).suffix
+    suffix = Path(original_name).suffix.lower()
+    if suffix not in allowed_extensions:
+        allowed_list = ", ".join(sorted(allowed_extensions))
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Unsupported file type. Allowed: {allowed_list}")
+
+    content_type = (upload_file.content_type or "").lower()
+    if content_type and content_type not in allowed_content_types:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Unexpected file content type")
+
+    file_bytes = upload_file.file.read(MAX_UPLOAD_BYTES + 1)
+    if not file_bytes:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Uploaded file is empty")
+    if len(file_bytes) > MAX_UPLOAD_BYTES:
+        raise HTTPException(status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail="Uploaded file exceeds the allowed size limit")
+
     stem = Path(original_name).stem
     stored_name = f"{stem}_{uuid.uuid4().hex[:8]}{suffix}"
     file_path = target_dir / stored_name
 
     with file_path.open("wb") as output_file:
-        output_file.write(upload_file.file.read())
+        output_file.write(file_bytes)
 
     return str(file_path), stored_name
 
@@ -387,12 +599,20 @@ def build_reports_response() -> ReportsResponse:
 
 @app.get("/health")
 def health():
-    return {"status": "ok"}
+    return {"status": "ok", "environment": APP_ENV}
 
 
 @app.post("/uploads/product-image")
-def upload_product_image(file: UploadFile = File(...)):
-    stored_path, stored_name = save_upload_file(file, PRODUCT_IMAGES_DIR)
+def upload_product_image(
+    file: UploadFile = File(...),
+    current_user: UserSummary = Depends(get_current_user),
+):
+    stored_path, stored_name = save_upload_file(
+        file,
+        PRODUCT_IMAGES_DIR,
+        PRODUCT_IMAGE_EXTENSIONS,
+        PRODUCT_IMAGE_CONTENT_TYPES,
+    )
     return {
         "message": "Product image uploaded successfully",
         "stored_path": stored_path,
@@ -401,8 +621,16 @@ def upload_product_image(file: UploadFile = File(...)):
 
 
 @app.post("/uploads/purchase-invoice")
-def upload_purchase_invoice(file: UploadFile = File(...)):
-    stored_path, stored_name = save_upload_file(file, PURCHASE_INVOICES_DIR)
+def upload_purchase_invoice(
+    file: UploadFile = File(...),
+    current_user: UserSummary = Depends(get_current_user),
+):
+    stored_path, stored_name = save_upload_file(
+        file,
+        PURCHASE_INVOICES_DIR,
+        PURCHASE_INVOICE_EXTENSIONS,
+        PURCHASE_INVOICE_CONTENT_TYPES,
+    )
     return {
         "message": "Purchase invoice uploaded successfully",
         "stored_path": stored_path,
@@ -410,13 +638,23 @@ def upload_purchase_invoice(file: UploadFile = File(...)):
     }
 
 
-@app.post("/auth/login", response_model=UserSummary)
+@app.get("/media/product-images/{file_name:path}")
+def get_product_image(file_name: str, current_user: UserSummary = Depends(get_current_user)):
+    return FileResponse(resolve_media_file(PRODUCT_IMAGES_DIR, file_name))
+
+
+@app.get("/media/purchase-invoices/{file_name:path}")
+def get_purchase_invoice(file_name: str, current_user: UserSummary = Depends(get_current_user)):
+    return FileResponse(resolve_media_file(PURCHASE_INVOICES_DIR, file_name))
+
+
+@app.post("/auth/login", response_model=AuthResponse)
 def auth_login(payload: LoginRequest):
     user = login_user(payload.username, payload.password)
     if not user:
         raise HTTPException(status_code=401, detail="Invalid username or password")
 
-    return UserSummary(
+    user_summary = UserSummary(
         user_id=user[0],
         full_name=user[1],
         username=user[2],
@@ -431,25 +669,34 @@ def auth_login(payload: LoginRequest):
             "can_delete_purchases": int(user[10]),
         },
     )
+    return AuthResponse(
+        **(user_summary.model_dump() if hasattr(user_summary, "model_dump") else user_summary.dict()),
+        access_token=create_access_token(user_summary.user_id),
+    )
+
+
+@app.get("/auth/me", response_model=UserSummary)
+def auth_me(current_user: UserSummary = Depends(get_current_user)):
+    return current_user
 
 
 @app.get("/dashboard", response_model=DashboardResponse)
-def dashboard():
+def dashboard(current_user: UserSummary = Depends(get_current_user)):
     return build_dashboard_response()
 
 
 @app.get("/components", response_model=ComponentListResponse)
-def list_components():
+def list_components(current_user: UserSummary = Depends(get_current_user)):
     return build_component_response()
 
 
 @app.get("/suppliers", response_model=SupplierListResponse)
-def list_suppliers():
+def list_suppliers(current_user: UserSummary = Depends(get_current_user)):
     return build_supplier_response()
 
 
 @app.post("/suppliers")
-def create_supplier(payload: SupplierCreateRequest):
+def create_supplier(payload: SupplierCreateRequest, current_user: UserSummary = Depends(get_current_user)):
     add_supplier(
         payload.supplier_name,
         payload.contact_number or "",
@@ -460,7 +707,11 @@ def create_supplier(payload: SupplierCreateRequest):
 
 
 @app.put("/suppliers/{supplier_id}")
-def edit_supplier(supplier_id: int, payload: SupplierUpdateRequest):
+def edit_supplier(
+    supplier_id: int,
+    payload: SupplierUpdateRequest,
+    current_user: UserSummary = Depends(require_supplier_edit),
+):
     update_supplier(
         supplier_id,
         payload.supplier_name,
@@ -472,7 +723,10 @@ def edit_supplier(supplier_id: int, payload: SupplierUpdateRequest):
 
 
 @app.delete("/suppliers/{supplier_id}")
-def remove_supplier(supplier_id: int):
+def remove_supplier(
+    supplier_id: int,
+    current_user: UserSummary = Depends(require_supplier_delete),
+):
     try:
         delete_supplier(supplier_id)
     except Exception as error:
@@ -481,12 +735,12 @@ def remove_supplier(supplier_id: int):
 
 
 @app.get("/users", response_model=UserListResponse)
-def list_users():
+def list_users(current_user: UserSummary = Depends(require_admin)):
     return build_user_response()
 
 
 @app.post("/users")
-def create_user(payload: UserCreateRequest):
+def create_user(payload: UserCreateRequest, current_user: UserSummary = Depends(require_admin)):
     result = add_user(
         payload.full_name,
         payload.username,
@@ -510,7 +764,11 @@ def create_user(payload: UserCreateRequest):
 
 
 @app.put("/users/{user_id}")
-def edit_user(user_id: int, payload: UserUpdateRequest):
+def edit_user(
+    user_id: int,
+    payload: UserUpdateRequest,
+    current_user: UserSummary = Depends(require_admin),
+):
     update_user(
         user_id,
         payload.full_name,
@@ -533,18 +791,25 @@ def edit_user(user_id: int, payload: UserUpdateRequest):
 
 
 @app.delete("/users/{user_id}")
-def remove_user(user_id: int):
+def remove_user(user_id: int, current_user: UserSummary = Depends(require_admin)):
+    target_user = get_user_by_id(user_id)
+    if not target_user:
+        raise HTTPException(status_code=404, detail="User not found")
+    if int(target_user[0]) == current_user.user_id:
+        raise HTTPException(status_code=400, detail="You cannot delete the currently logged-in user")
+    if str(target_user[2]).lower() == "admin":
+        raise HTTPException(status_code=400, detail="Default admin account cannot be deleted")
     delete_user(user_id)
     return {"message": "User deleted successfully"}
 
 
 @app.get("/assignments", response_model=AssignmentListResponse)
-def list_assignments():
+def list_assignments(current_user: UserSummary = Depends(get_current_user)):
     return build_assignment_response()
 
 
 @app.post("/assignments")
-def create_assignment(payload: AssignmentCreateRequest):
+def create_assignment(payload: AssignmentCreateRequest, current_user: UserSummary = Depends(get_current_user)):
     update_product_assignment(
         payload.product_id,
         payload.assigned_to,
@@ -556,7 +821,7 @@ def create_assignment(payload: AssignmentCreateRequest):
 
 
 @app.post("/components")
-def create_component(payload: ComponentCreateRequest):
+def create_component(payload: ComponentCreateRequest, current_user: UserSummary = Depends(get_current_user)):
     product_no = generate_product_no()
     result = add_product(
         product_no,
@@ -575,7 +840,11 @@ def create_component(payload: ComponentCreateRequest):
 
 
 @app.put("/components/{product_id}")
-def edit_component(product_id: int, payload: ComponentUpdateRequest):
+def edit_component(
+    product_id: int,
+    payload: ComponentUpdateRequest,
+    current_user: UserSummary = Depends(require_product_edit),
+):
     update_product(
         product_id,
         payload.product_name,
@@ -590,7 +859,10 @@ def edit_component(product_id: int, payload: ComponentUpdateRequest):
 
 
 @app.delete("/components/{product_id}")
-def remove_component(product_id: int):
+def remove_component(
+    product_id: int,
+    current_user: UserSummary = Depends(require_product_delete),
+):
     try:
         delete_product(product_id)
     except Exception as error:
@@ -599,12 +871,12 @@ def remove_component(product_id: int):
 
 
 @app.get("/purchases", response_model=PurchaseListResponse)
-def list_purchases():
+def list_purchases(current_user: UserSummary = Depends(get_current_user)):
     return build_purchase_response()
 
 
 @app.post("/purchases")
-def create_purchase(payload: PurchaseCreateRequest):
+def create_purchase(payload: PurchaseCreateRequest, current_user: UserSummary = Depends(get_current_user)):
     product_options = get_product_dropdown()
     product_row = product_options[product_options["product_id"] == payload.product_id]
     if product_row.empty:
@@ -626,7 +898,11 @@ def create_purchase(payload: PurchaseCreateRequest):
 
 
 @app.put("/purchases/{purchase_id}")
-def edit_purchase(purchase_id: int, payload: PurchaseUpdateRequest):
+def edit_purchase(
+    purchase_id: int,
+    payload: PurchaseUpdateRequest,
+    current_user: UserSummary = Depends(require_purchase_edit),
+):
     update_purchase(
         purchase_id,
         payload.quantity,
@@ -638,18 +914,21 @@ def edit_purchase(purchase_id: int, payload: PurchaseUpdateRequest):
 
 
 @app.delete("/purchases/{purchase_id}")
-def remove_purchase(purchase_id: int):
+def remove_purchase(
+    purchase_id: int,
+    current_user: UserSummary = Depends(require_purchase_delete),
+):
     delete_purchase(purchase_id)
     return {"message": "Purchase deleted successfully"}
 
 
 @app.get("/sales", response_model=SaleListResponse)
-def list_sales():
+def list_sales(current_user: UserSummary = Depends(get_current_user)):
     return build_sale_response()
 
 
 @app.post("/sales")
-def create_sale(payload: SaleCreateRequest):
+def create_sale(payload: SaleCreateRequest, current_user: UserSummary = Depends(get_current_user)):
     product_options = get_product_dropdown()
     product_row = product_options[product_options["product_id"] == payload.product_id]
     if product_row.empty:
@@ -670,7 +949,7 @@ def create_sale(payload: SaleCreateRequest):
 
 
 @app.put("/sales/{sale_id}")
-def edit_sale(sale_id: int, payload: SaleUpdateRequest):
+def edit_sale(sale_id: int, payload: SaleUpdateRequest, current_user: UserSummary = Depends(get_current_user)):
     result = update_sale(
         sale_id,
         payload.quantity_sold,
@@ -684,22 +963,22 @@ def edit_sale(sale_id: int, payload: SaleUpdateRequest):
 
 
 @app.delete("/sales/{sale_id}")
-def remove_sale(sale_id: int):
+def remove_sale(sale_id: int, current_user: UserSummary = Depends(get_current_user)):
     delete_sale(sale_id)
     return {"message": "Sale deleted successfully"}
 
 
 @app.get("/notes", response_model=NoteListResponse)
-def list_notes():
+def list_notes(current_user: UserSummary = Depends(get_current_user)):
     return build_note_response()
 
 
 @app.post("/notes")
-def create_note(payload: NoteCreateRequest):
+def create_note(payload: NoteCreateRequest, current_user: UserSummary = Depends(get_current_user)):
     add_note(
         payload.note_title,
         payload.note_content,
-        payload.created_by,
+        current_user.full_name,
         payload.created_date,
         payload.note_status,
         payload.assigned_to or "",
@@ -708,7 +987,7 @@ def create_note(payload: NoteCreateRequest):
 
 
 @app.put("/notes/{note_id}")
-def edit_note(note_id: int, payload: NoteUpdateRequest):
+def edit_note(note_id: int, payload: NoteUpdateRequest, current_user: UserSummary = Depends(get_current_user)):
     update_note(
         note_id,
         payload.note_title,
@@ -720,11 +999,11 @@ def edit_note(note_id: int, payload: NoteUpdateRequest):
 
 
 @app.delete("/notes/{note_id}")
-def remove_note(note_id: int):
+def remove_note(note_id: int, current_user: UserSummary = Depends(get_current_user)):
     delete_note(note_id)
     return {"message": "Note deleted successfully"}
 
 
 @app.get("/reports", response_model=ReportsResponse)
-def get_reports():
+def get_reports(current_user: UserSummary = Depends(get_current_user)):
     return build_reports_response()

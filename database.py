@@ -1094,6 +1094,22 @@ def get_users():
     """)
 
 
+def get_user_by_id(user_id):
+    return execute(
+        """
+        SELECT user_id, full_name, username, role, department,
+               date_of_joining, office_email, company_email, contact_number,
+               can_edit_suppliers, can_delete_suppliers,
+               can_edit_products, can_delete_products,
+               can_edit_purchases, can_delete_purchases
+        FROM users
+        WHERE user_id = ?
+        """,
+        (user_id,),
+        fetchone=True,
+    )
+
+
 def get_user_dropdown():
     return read_dataframe("""
         SELECT user_id, full_name, username, role
