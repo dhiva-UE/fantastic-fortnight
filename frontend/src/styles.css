@@ -748,8 +748,28 @@ input[type="date"]::-webkit-calendar-picker-indicator:hover {
 .sidebar-reopen {
   min-width: 40px;
   width: 40px;
+  height: 40px;
   padding: 0;
-  font-size: 1.05rem;
+  font-size: 1.45rem;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  background: rgba(255, 255, 255, 0.02);
+  color: rgba(234, 244, 251, 0.92);
+  box-shadow: none;
+}
+
+.sidebar-toggle::before,
+.sidebar-reopen::before {
+  display: none;
+}
+
+.sidebar-toggle:hover,
+.sidebar-reopen:hover {
+  transform: none;
+  filter: none;
+  background: rgba(255, 255, 255, 0.06);
+  border-color: rgba(255, 255, 255, 0.12);
+  box-shadow: none;
 }
 
 .sidebar-reopen {

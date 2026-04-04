@@ -683,6 +683,8 @@ function ComponentsView({ componentsPayload, onRefresh, onConfirm }) {
   const [selectedComponentId, setSelectedComponentId] = useState(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  const [searchValue, setSearchValue] = useState("");
+  const [supplierFilter, setSupplierFilter] = useState("all");
 
   const suppliers = componentsPayload?.suppliers ?? [];
   const employees = componentsPayload?.employees ?? [];
@@ -692,6 +694,21 @@ function ComponentsView({ componentsPayload, onRefresh, onConfirm }) {
     () => items.find((item) => Number(item.product_id) === Number(selectedComponentId)) || null,
     [items, selectedComponentId]
   );
+
+  const filteredItems = useMemo(() => {
+    const normalized = searchValue.trim().toLowerCase();
+    return items.filter((item) => {
+      const matchesSupplier = supplierFilter === "all" || item.supplier_name === supplierFilter;
+      const matchesSearch = !normalized || [
+        item.product_no,
+        item.product_name,
+        item.category,
+        item.supplier_name,
+        item.assigned_to
+      ].some((value) => getCellDisplayValue(value).toLowerCase().includes(normalized));
+      return matchesSupplier && matchesSearch;
+    });
+  }, [items, searchValue, supplierFilter]);
 
   useEffect(() => {
     if (selectedComponentId !== null) {
@@ -767,6 +784,24 @@ function ComponentsView({ componentsPayload, onRefresh, onConfirm }) {
             <p className="panel-copy">Current component records across the inventory system.</p>
           </div>
         </div>
+        <div className="report-toolbar">
+          <div className="report-filter-row">
+            <label className="report-filter-field">
+              Supplier
+              <select value={supplierFilter} onChange={(event) => setSupplierFilter(event.target.value)}>
+                <option value="all">All Suppliers</option>
+                {suppliers.map((supplier) => (
+                  <option key={supplier.supplier_id} value={supplier.supplier_name}>{supplier.supplier_name}</option>
+                ))}
+              </select>
+            </label>
+            <label className="report-filter-field report-filter-search">
+              Search
+              <input value={searchValue} onChange={(event) => setSearchValue(event.target.value)} placeholder="Search component, category, supplier or assignee" />
+            </label>
+          </div>
+          <p className="report-filter-meta">Showing {filteredItems.length} of {items.length} rows</p>
+        </div>
         <div className="table-shell">
           <table>
             <thead>
@@ -783,11 +818,11 @@ function ComponentsView({ componentsPayload, onRefresh, onConfirm }) {
               </tr>
             </thead>
             <tbody>
-              {items.length === 0 ? (
+              {filteredItems.length === 0 ? (
                 <tr>
                   <td colSpan="9" className="empty-state-cell">No components available</td>
                 </tr>
-              ) : items.map((item) => (
+              ) : filteredItems.map((item) => (
                 <tr key={item.product_id}>
                   <td>{item.product_no}</td>
                   <td>{item.product_name}</td>
@@ -960,6 +995,8 @@ function PurchasesView({ purchasesPayload, onRefresh, onConfirm, onSuccess }) {
   const [selectedPurchaseId, setSelectedPurchaseId] = useState(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  const [searchValue, setSearchValue] = useState("");
+  const [supplierFilter, setSupplierFilter] = useState("all");
 
   const items = purchasesPayload?.items ?? [];
   const products = purchasesPayload?.products ?? [];
@@ -969,6 +1006,21 @@ function PurchasesView({ purchasesPayload, onRefresh, onConfirm, onSuccess }) {
     () => items.find((item) => Number(item.purchase_id) === Number(selectedPurchaseId)) || null,
     [items, selectedPurchaseId]
   );
+
+  const filteredItems = useMemo(() => {
+    const normalized = searchValue.trim().toLowerCase();
+    return items.filter((item) => {
+      const matchesSupplier = supplierFilter === "all" || item.supplier_name === supplierFilter;
+      const matchesSearch = !normalized || [
+        item.purchase_id,
+        item.product_no,
+        item.product_name,
+        item.supplier_name,
+        item.purchase_date
+      ].some((value) => getCellDisplayValue(value).toLowerCase().includes(normalized));
+      return matchesSupplier && matchesSearch;
+    });
+  }, [items, searchValue, supplierFilter]);
 
   useEffect(() => {
     if (selectedPurchaseId !== null) {
@@ -1047,6 +1099,24 @@ function PurchasesView({ purchasesPayload, onRefresh, onConfirm, onSuccess }) {
             <p className="panel-copy">Inbound purchase records with supplier and invoice context.</p>
           </div>
         </div>
+        <div className="report-toolbar">
+          <div className="report-filter-row">
+            <label className="report-filter-field">
+              Supplier
+              <select value={supplierFilter} onChange={(event) => setSupplierFilter(event.target.value)}>
+                <option value="all">All Suppliers</option>
+                {suppliers.map((supplier) => (
+                  <option key={supplier.supplier_id} value={supplier.supplier_name}>{supplier.supplier_name}</option>
+                ))}
+              </select>
+            </label>
+            <label className="report-filter-field report-filter-search">
+              Search
+              <input value={searchValue} onChange={(event) => setSearchValue(event.target.value)} placeholder="Search purchase, component, supplier or date" />
+            </label>
+          </div>
+          <p className="report-filter-meta">Showing {filteredItems.length} of {items.length} rows</p>
+        </div>
         <div className="table-shell">
           <table>
             <thead>
@@ -1063,11 +1133,11 @@ function PurchasesView({ purchasesPayload, onRefresh, onConfirm, onSuccess }) {
               </tr>
             </thead>
             <tbody>
-              {items.length === 0 ? (
+              {filteredItems.length === 0 ? (
                 <tr>
                   <td colSpan="9" className="empty-state-cell">No purchases available</td>
                 </tr>
-              ) : items.map((item) => (
+              ) : filteredItems.map((item) => (
                 <tr key={item.purchase_id}>
                   <td>{item.purchase_id}</td>
                   <td>{item.product_no} - {item.product_name}</td>
