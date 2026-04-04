@@ -125,6 +125,25 @@ function ConfirmDialog({ open, title, message, confirmLabel = "Confirm", cancelL
   );
 }
 
+function Toast({ message, onClose }) {
+  useEffect(() => {
+    if (!message) return undefined;
+    const timeoutId = window.setTimeout(onClose, 2600);
+    return () => window.clearTimeout(timeoutId);
+  }, [message, onClose]);
+
+  if (!message) return null;
+
+  return (
+    <div className="toast-shell" role="status" aria-live="polite">
+      <div className="toast-card">
+        <strong>Success</strong>
+        <span>{message}</span>
+      </div>
+    </div>
+  );
+}
+
 function SearchableSelect({
   options,
   value,
@@ -424,7 +443,6 @@ function DashboardView({ dashboard }) {
         <MetricCard label="Employees" value={metrics?.total_employees ?? 0} />
         <MetricCard label="Inventory Value" value={formatCurrency(metrics?.inventory_value)} />
         <MetricCard label="Purchase Value" value={formatCurrency(metrics?.total_purchase_value)} />
-        <MetricCard label="Sales Revenue" value={formatCurrency(metrics?.total_sales_value)} />
       </section>
 
       <section className="panel-grid">
@@ -445,6 +463,7 @@ function DashboardView({ dashboard }) {
             { key: "product_name", label: "Component" },
             { key: "supplier_name", label: "Supplier" },
             { key: "quantity_purchased", label: "Qty" },
+            { key: "total_purchase_price", label: "Total Price" },
             { key: "purchase_date", label: "Date" }
           ]}
         />
@@ -937,7 +956,7 @@ function PurchaseForm({ products, suppliers, selectedPurchase, onSubmit, saving,
   );
 }
 
-function PurchasesView({ purchasesPayload, onRefresh, onConfirm }) {
+function PurchasesView({ purchasesPayload, onRefresh, onConfirm, onSuccess }) {
   const [selectedPurchaseId, setSelectedPurchaseId] = useState(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
@@ -963,8 +982,10 @@ function PurchasesView({ purchasesPayload, onRefresh, onConfirm }) {
     try {
       if (selectedPurchase) {
         await updatePurchase(selectedPurchase.purchase_id, payload);
+        onSuccess?.("Purchase updated successfully.");
       } else {
         await createPurchase(payload);
+        onSuccess?.("Purchase added successfully.");
       }
       setSelectedPurchaseId(null);
       await onRefresh();
@@ -986,6 +1007,7 @@ function PurchasesView({ purchasesPayload, onRefresh, onConfirm }) {
     setError("");
     try {
       await deletePurchase(purchaseId);
+      onSuccess?.("Purchase deleted successfully.");
       if (Number(selectedPurchaseId) === Number(purchaseId)) {
         setSelectedPurchaseId(null);
       }
@@ -1672,12 +1694,13 @@ function SuppliersView({ suppliersPayload, onRefresh, onConfirm }) {
 
 function PermissionSelect({ label, value, onChange }) {
   return (
-    <label>
-      {label}
-      <select value={value} onChange={(event) => onChange(Number(event.target.value))}>
-        <option value={0}>0 - No</option>
-        <option value={1}>1 - Yes</option>
-      </select>
+    <label className="permission-checkbox">
+      <input
+        type="checkbox"
+        checked={Number(value) === 1}
+        onChange={(event) => onChange(event.target.checked ? 1 : 0)}
+      />
+      <span>{label}</span>
     </label>
   );
 }
@@ -1739,11 +1762,11 @@ function UserForm({ selectedUser, onSubmit, saving, onCancel }) {
           <input type="date" value={formState.date_of_joining} onChange={(event) => handleChange("date_of_joining", event.target.value)} />
         </label>
         <label>
-          Office Email
+          Personal Email
           <input value={formState.office_email} onChange={(event) => handleChange("office_email", event.target.value)} />
         </label>
         <label>
-          Company Email
+          Office Email
           <input value={formState.company_email} onChange={(event) => handleChange("company_email", event.target.value)} />
         </label>
         <label className="full-span">
@@ -1764,7 +1787,7 @@ function UserForm({ selectedUser, onSubmit, saving, onCancel }) {
   );
 }
 
-function UsersView({ usersPayload, currentUser, onRefresh, onConfirm }) {
+function UsersView({ usersPayload, currentUser, onRefresh, onConfirm, onSuccess }) {
   const [selectedUserId, setSelectedUserId] = useState(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
@@ -1787,8 +1810,10 @@ function UsersView({ usersPayload, currentUser, onRefresh, onConfirm }) {
     try {
       if (selectedUser) {
         await updateUser(selectedUser.user_id, payload);
+        onSuccess?.("User updated successfully.");
       } else {
         await createUser(payload);
+        onSuccess?.("User created successfully.");
       }
       setSelectedUserId(null);
       await onRefresh();
@@ -1818,6 +1843,7 @@ function UsersView({ usersPayload, currentUser, onRefresh, onConfirm }) {
     setError("");
     try {
       await deleteUser(userId);
+      onSuccess?.("User deleted successfully.");
       if (Number(selectedUserId) === Number(userId)) {
         setSelectedUserId(null);
       }
@@ -1868,7 +1894,7 @@ function UsersView({ usersPayload, currentUser, onRefresh, onConfirm }) {
                   <td>{item.username}</td>
                   <td>{item.role}</td>
                   <td>{item.department || "-"}</td>
-                  <td>{item.office_email || "-"}</td>
+                  <td>{item.company_email || "-"}</td>
                   <td>
                     <div className="row-actions">
                       <button className="ghost-button slim" type="button" onClick={() => setSelectedUserId(item.user_id)}>Edit</button>
@@ -1888,6 +1914,8 @@ function UsersView({ usersPayload, currentUser, onRefresh, onConfirm }) {
 function AssignmentsView({ assignmentsPayload, onRefresh }) {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  const [searchValue, setSearchValue] = useState("");
+  const [statusFilter, setStatusFilter] = useState("all");
   const [formState, setFormState] = useState(() => buildInitialAssignmentFormState(assignmentsPayload?.products ?? [], assignmentsPayload?.employees ?? []));
 
   const items = assignmentsPayload?.items ?? [];
@@ -1932,6 +1960,21 @@ function AssignmentsView({ assignmentsPayload, onRefresh }) {
     value: employee.full_name,
     label: `${employee.full_name} (${employee.role})`
   }));
+
+  const filteredItems = useMemo(() => {
+    const normalized = searchValue.trim().toLowerCase();
+    return items.filter((item) => {
+      const matchesStatus = statusFilter === "all" || item.status === statusFilter;
+      const matchesSearch = !normalized || [
+        item.product_no,
+        item.product_name,
+        item.assigned_to,
+        item.status,
+        item.remarks
+      ].some((value) => getCellDisplayValue(value).toLowerCase().includes(normalized));
+      return matchesStatus && matchesSearch;
+    });
+  }, [items, searchValue, statusFilter]);
 
   return (
     <>
@@ -1998,6 +2041,25 @@ function AssignmentsView({ assignmentsPayload, onRefresh }) {
             <p className="panel-copy">Historical transfers and status changes for component ownership.</p>
           </div>
         </div>
+        <div className="report-toolbar">
+          <div className="report-filter-row">
+            <label className="report-filter-field">
+              Status
+              <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}>
+                <option value="all">All Status</option>
+                <option value="In Progress">In Progress</option>
+                <option value="Under Review">Under Review</option>
+                <option value="Testing">Testing</option>
+                <option value="Completed">Completed</option>
+              </select>
+            </label>
+            <label className="report-filter-field report-filter-search">
+              Search
+              <input value={searchValue} onChange={(event) => setSearchValue(event.target.value)} placeholder="Search component, employee, status or remarks" />
+            </label>
+          </div>
+          <p className="report-filter-meta">Showing {filteredItems.length} of {items.length} rows</p>
+        </div>
         <div className="table-shell">
           <table>
             <thead>
@@ -2011,9 +2073,9 @@ function AssignmentsView({ assignmentsPayload, onRefresh }) {
               </tr>
             </thead>
             <tbody>
-              {items.length === 0 ? (
+              {filteredItems.length === 0 ? (
                 <tr><td colSpan="6" className="empty-state-cell">No assignment history available</td></tr>
-              ) : items.map((item) => (
+              ) : filteredItems.map((item) => (
                 <tr key={item.assignment_id}>
                   <td>{item.assignment_id}</td>
                   <td>{item.product_no} - {item.product_name}</td>
@@ -2271,6 +2333,8 @@ export default function App() {
   const [activeView, setActiveView] = useState("dashboard");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [toastMessage, setToastMessage] = useState("");
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [confirmState, setConfirmState] = useState({
     open: false,
     title: "",
@@ -2409,10 +2473,21 @@ export default function App() {
 
   return (
     <main className="app-shell">
-      <aside className="sidebar">
-        <div>
-          <AnimatedLogo compact />
-          <h2>Inventory OS</h2>
+      <aside className={`sidebar ${isSidebarCollapsed ? "collapsed" : ""}`}>
+        <div className="sidebar-header">
+          <div className="sidebar-brand">
+            <AnimatedLogo compact />
+            <h2>Inventory OS</h2>
+          </div>
+          <button
+            className="ghost-button slim sidebar-toggle"
+            type="button"
+            onClick={() => setIsSidebarCollapsed((current) => !current)}
+            aria-label={isSidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
+            title={isSidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
+          >
+            {isSidebarCollapsed ? "\u203a" : "\u2039"}
+          </button>
         </div>
         <nav className="nav-list">
           <button className={`nav-item ${activeView === "dashboard" ? "active" : ""}`} onClick={() => setActiveView("dashboard")}>Dashboard</button>
@@ -2447,18 +2522,31 @@ export default function App() {
         </div>
       </aside>
 
-      <section className="content">
+      {isSidebarCollapsed ? (
+        <button
+          className="ghost-button slim sidebar-reopen"
+          type="button"
+          onClick={() => setIsSidebarCollapsed(false)}
+          aria-label="Expand sidebar"
+          title="Expand sidebar"
+        >
+          {"\u203a"}
+        </button>
+      ) : null}
+
+      <section className={`content ${isSidebarCollapsed ? "expanded" : ""}`}>
         {error ? <div className="error-banner inline-banner">{error}</div> : null}
         {activeView === "dashboard" ? <DashboardView dashboard={dashboard} /> : null}
         {activeView === "suppliers" ? <SuppliersView suppliersPayload={suppliersPayload} onRefresh={refreshOperationalData} onConfirm={requestConfirm} /> : null}
         {activeView === "components" ? <ComponentsView componentsPayload={componentsPayload} onRefresh={refreshOperationalData} onConfirm={requestConfirm} /> : null}
         {activeView === "assignments" ? <AssignmentsView assignmentsPayload={assignmentsPayload} onRefresh={refreshOperationalData} /> : null}
-        {activeView === "purchases" ? <PurchasesView purchasesPayload={purchasesPayload} onRefresh={refreshOperationalData} onConfirm={requestConfirm} /> : null}
+        {activeView === "purchases" ? <PurchasesView purchasesPayload={purchasesPayload} onRefresh={refreshOperationalData} onConfirm={requestConfirm} onSuccess={setToastMessage} /> : null}
         {activeView === "sales" ? <SalesView salesPayload={salesPayload} onRefresh={refreshOperationalData} onConfirm={requestConfirm} /> : null}
         {activeView === "notes" ? <NotesView notesPayload={notesPayload} currentUser={user} onRefresh={refreshOperationalData} onConfirm={requestConfirm} /> : null}
-        {activeView === "users" && canAccessUsers ? <UsersView usersPayload={usersPayload} currentUser={user} onRefresh={refreshOperationalData} onConfirm={requestConfirm} /> : null}
+        {activeView === "users" && canAccessUsers ? <UsersView usersPayload={usersPayload} currentUser={user} onRefresh={refreshOperationalData} onConfirm={requestConfirm} onSuccess={setToastMessage} /> : null}
         {activeView === "reports" ? <ReportsView reportsPayload={reportsPayload} /> : null}
       </section>
+      <Toast message={toastMessage} onClose={() => setToastMessage("")} />
       <ConfirmDialog
         open={confirmState.open}
         title={confirmState.title}

@@ -720,6 +720,43 @@ input[type="date"]::-webkit-calendar-picker-indicator:hover {
   background:
     linear-gradient(180deg, rgba(7, 10, 14, 0.96), rgba(9, 14, 20, 0.92)),
     rgba(8, 12, 17, 0.74);
+  transition: transform 220ms ease, opacity 220ms ease;
+}
+
+.sidebar.collapsed {
+  transform: translateX(-100%);
+  opacity: 0;
+  pointer-events: none;
+}
+
+.sidebar-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.sidebar-brand {
+  min-width: 0;
+}
+
+.sidebar-brand h2 {
+  margin: 0.2rem 0 0;
+}
+
+.sidebar-toggle,
+.sidebar-reopen {
+  min-width: 40px;
+  width: 40px;
+  padding: 0;
+  font-size: 1.05rem;
+}
+
+.sidebar-reopen {
+  position: fixed;
+  top: 1.25rem;
+  left: 1rem;
+  z-index: 12;
 }
 
 .nav-list {
@@ -792,6 +829,8 @@ input[type="date"]::-webkit-calendar-picker-indicator:hover {
   height: 38px;
   padding: 0 1rem;
   border-radius: 999px;
+  white-space: nowrap;
+  min-width: max-content;
 }
 
 .danger-button {
@@ -826,6 +865,11 @@ input[type="date"]::-webkit-calendar-picker-indicator:hover {
   padding: 1.75rem;
   display: grid;
   gap: 1.25rem;
+  transition: margin-left 220ms ease;
+}
+
+.content.expanded {
+  margin-left: 0;
 }
 
 .hero {
@@ -959,6 +1003,11 @@ td {
   flex-wrap: wrap;
 }
 
+.row-actions .ghost-button,
+.row-actions .danger-button {
+  white-space: nowrap;
+}
+
 .report-tabs {
   display: flex;
   gap: 0.75rem;
@@ -1055,6 +1104,106 @@ td {
   text-decoration: none;
 }
 
+.permission-checkbox {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+  min-height: 48px;
+  padding: 0.85rem 0.95rem;
+  border-radius: var(--radius-sm);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.03);
+  color: rgba(234, 244, 251, 0.94);
+}
+
+.permission-checkbox input {
+  width: 18px;
+  height: 18px;
+  accent-color: rgb(233, 131, 42);
+}
+
+.permission-checkbox span {
+  line-height: 1.4;
+}
+
+.toast-shell {
+  position: fixed;
+  top: 1.4rem;
+  right: 1.4rem;
+  z-index: 60;
+}
+
+.toast-card {
+  display: grid;
+  gap: 0.18rem;
+  min-width: 260px;
+  padding: 0.95rem 1rem;
+  border-radius: 18px;
+  border: 1px solid rgba(255, 171, 92, 0.32);
+  background:
+    radial-gradient(circle at top right, rgba(255, 153, 61, 0.14), transparent 32%),
+    linear-gradient(180deg, rgba(12, 16, 22, 0.98), rgba(8, 11, 16, 0.98));
+  box-shadow: 0 22px 44px rgba(0, 0, 0, 0.34);
+}
+
+.toast-card strong {
+  color: #fff;
+}
+
+.toast-card span {
+  color: rgba(234, 244, 251, 0.82);
+}
+
+.permission-checkbox {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+  min-height: 48px;
+  padding: 0.85rem 0.95rem;
+  border-radius: var(--radius-sm);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.03);
+  color: rgba(234, 244, 251, 0.94);
+}
+
+.permission-checkbox input {
+  width: 18px;
+  height: 18px;
+  accent-color: rgb(233, 131, 42);
+}
+
+.permission-checkbox span {
+  line-height: 1.4;
+}
+
+.toast-shell {
+  position: fixed;
+  top: 1.4rem;
+  right: 1.4rem;
+  z-index: 60;
+}
+
+.toast-card {
+  display: grid;
+  gap: 0.18rem;
+  min-width: 260px;
+  padding: 0.95rem 1rem;
+  border-radius: 18px;
+  border: 1px solid rgba(255, 171, 92, 0.32);
+  background:
+    radial-gradient(circle at top right, rgba(255, 153, 61, 0.14), transparent 32%),
+    linear-gradient(180deg, rgba(12, 16, 22, 0.98), rgba(8, 11, 16, 0.98));
+  box-shadow: 0 22px 44px rgba(0, 0, 0, 0.34);
+}
+
+.toast-card strong {
+  color: #fff;
+}
+
+.toast-card span {
+  color: rgba(234, 244, 251, 0.82);
+}
+
 @media (max-width: 1180px) {
   .app-shell {
     display: block;
@@ -1067,10 +1216,27 @@ td {
     position: relative;
     left: auto;
     z-index: auto;
+    transform: none;
+    opacity: 1;
+    pointer-events: auto;
+  }
+
+  .sidebar.collapsed {
+    transform: none;
+    opacity: 1;
+    pointer-events: auto;
   }
 
   .content {
     margin-left: 0;
+  }
+
+  .content.expanded {
+    margin-left: 0;
+  }
+
+  .sidebar-reopen {
+    display: none;
   }
 
   .nav-list {
