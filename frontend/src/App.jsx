@@ -71,6 +71,27 @@ function scrollPageToTop() {
   window.scrollTo({ top: 0, behavior: "smooth" });
 }
 
+function openFileInNewTab(fileUrl) {
+  if (!fileUrl) {
+    return;
+  }
+
+  window.open(fileUrl, "_blank", "noopener,noreferrer");
+}
+
+function downloadFile(fileUrl) {
+  if (!fileUrl) {
+    return;
+  }
+
+  const downloadLink = document.createElement("a");
+  downloadLink.href = fileUrl;
+  downloadLink.download = "";
+  document.body.appendChild(downloadLink);
+  downloadLink.click();
+  document.body.removeChild(downloadLink);
+}
+
 function ConfirmDialog({ open, title, message, confirmLabel = "Confirm", cancelLabel = "Cancel", danger = false, onConfirm, onCancel }) {
   if (!open) {
     return null;
@@ -216,7 +237,7 @@ function SearchableSelect({
   );
 }
 
-function DataCard({ title, columns, rows }) {
+function DataCard({ title, columns, rows, rowActions = null }) {
   const [filterColumn, setFilterColumn] = useState("all");
   const [filterValue, setFilterValue] = useState("");
 
@@ -313,12 +334,13 @@ function DataCard({ title, columns, rows }) {
               {columns.map((column) => (
                 <th key={column.key}>{column.label}</th>
               ))}
+              {rowActions ? <th>Actions</th> : null}
             </tr>
           </thead>
           <tbody>
             {filteredRows.length === 0 ? (
               <tr>
-                <td colSpan={columns.length} className="empty-state-cell">
+                <td colSpan={columns.length + (rowActions ? 1 : 0)} className="empty-state-cell">
                   {rows.length === 0 ? "No records available" : "No matching records found"}
                 </td>
               </tr>
@@ -328,6 +350,7 @@ function DataCard({ title, columns, rows }) {
                   {columns.map((column) => (
                     <td key={column.key}>{getCellDisplayValue(row[column.key])}</td>
                   ))}
+                  {rowActions ? <td>{rowActions(row)}</td> : null}
                 </tr>
               ))
             )}
@@ -722,7 +745,7 @@ function ComponentsView({ componentsPayload, onRefresh, onConfirm }) {
         <div className="panel-header split-header">
           <div>
             <h3>Component Inventory</h3>
-            <p className="panel-copy">Current component records from PostgreSQL via FastAPI.</p>
+            <p className="panel-copy">Current component records across the inventory system.</p>
           </div>
         </div>
         <div className="table-shell">
@@ -734,6 +757,7 @@ function ComponentsView({ componentsPayload, onRefresh, onConfirm }) {
                 <th>Category</th>
                 <th>Supplier</th>
                 <th>Assigned To</th>
+                <th>Image</th>
                 <th>Price</th>
                 <th>Stock</th>
                 <th>Actions</th>
@@ -742,7 +766,7 @@ function ComponentsView({ componentsPayload, onRefresh, onConfirm }) {
             <tbody>
               {items.length === 0 ? (
                 <tr>
-                  <td colSpan="8" className="empty-state-cell">No components available</td>
+                  <td colSpan="9" className="empty-state-cell">No components available</td>
                 </tr>
               ) : items.map((item) => (
                 <tr key={item.product_id}>
@@ -751,6 +775,11 @@ function ComponentsView({ componentsPayload, onRefresh, onConfirm }) {
                   <td>{item.category || "-"}</td>
                   <td>{item.supplier_name || "-"}</td>
                   <td>{item.assigned_to || "-"}</td>
+                  <td>
+                    {item.image_url ? (
+                      <button className="ghost-button slim" type="button" onClick={() => openFileInNewTab(item.image_url)}>View Image</button>
+                    ) : "-"}
+                  </td>
                   <td>{formatCurrency(item.price)}</td>
                   <td>{item.quantity}</td>
                   <td>
@@ -1007,13 +1036,14 @@ function PurchasesView({ purchasesPayload, onRefresh, onConfirm }) {
                 <th>Unit Price</th>
                 <th>Total</th>
                 <th>Date</th>
+                <th>Invoice</th>
                 <th>Actions</th>
               </tr>
             </thead>
             <tbody>
               {items.length === 0 ? (
                 <tr>
-                  <td colSpan="8" className="empty-state-cell">No purchases available</td>
+                  <td colSpan="9" className="empty-state-cell">No purchases available</td>
                 </tr>
               ) : items.map((item) => (
                 <tr key={item.purchase_id}>
@@ -1024,6 +1054,14 @@ function PurchasesView({ purchasesPayload, onRefresh, onConfirm }) {
                   <td>{formatCurrency(item.unit_price)}</td>
                   <td>{formatCurrency(item.total_purchase_price)}</td>
                   <td>{item.purchase_date}</td>
+                  <td>
+                    {item.invoice_url ? (
+                      <div className="row-actions">
+                        <button className="ghost-button slim" type="button" onClick={() => openFileInNewTab(item.invoice_url)}>View</button>
+                        <button className="ghost-button slim" type="button" onClick={() => downloadFile(item.invoice_url)}>Download</button>
+                      </div>
+                    ) : "-"}
+                  </td>
                   <td>
                     <div className="row-actions">
                       <button className="ghost-button slim" type="button" onClick={() => setSelectedPurchaseId(item.purchase_id)}>Edit</button>
@@ -2006,7 +2044,10 @@ function ReportsView({ reportsPayload }) {
         { key: "category", label: "Category" },
         { key: "quantity", label: "Stock" },
         { key: "supplier_name", label: "Supplier" }
-      ]
+      ],
+      rowActions: (row) => row.image_url ? (
+        <button className="ghost-button slim" type="button" onClick={() => openFileInNewTab(row.image_url)}>View Image</button>
+      ) : "-"
     },
     suppliers: {
       title: "Suppliers Report",
@@ -2027,7 +2068,13 @@ function ReportsView({ reportsPayload }) {
         { key: "quantity_purchased", label: "Qty" },
         { key: "total_purchase_price", label: "Total" },
         { key: "purchase_date", label: "Date" }
-      ]
+      ],
+      rowActions: (row) => row.invoice_url ? (
+        <div className="row-actions">
+          <button className="ghost-button slim" type="button" onClick={() => openFileInNewTab(row.invoice_url)}>View</button>
+          <button className="ghost-button slim" type="button" onClick={() => downloadFile(row.invoice_url)}>Download</button>
+        </div>
+      ) : "-"
     },
     sales: {
       title: "Sales Report",
@@ -2113,7 +2160,7 @@ function ReportsView({ reportsPayload }) {
           ))}
         </div>
       </section>
-      <DataCard title={activeReport.title} columns={activeReport.columns} rows={activeReport.rows} />
+      <DataCard title={activeReport.title} columns={activeReport.columns} rows={activeReport.rows} rowActions={activeReport.rowActions} />
     </>
   );
 }

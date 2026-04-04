@@ -364,10 +364,19 @@ def build_assignment_response() -> AssignmentListResponse:
 
 
 def build_reports_response() -> ReportsResponse:
+    products_df = get_products().fillna("")
+    purchases_df = get_purchases().fillna("")
+
+    if not products_df.empty:
+        products_df["image_url"] = products_df["image_path"].apply(build_public_file_url)
+
+    if not purchases_df.empty:
+        purchases_df["invoice_url"] = purchases_df["invoice_path"].apply(build_public_file_url)
+
     return ReportsResponse(
-        products=get_products().fillna("").to_dict(orient="records"),
+        products=products_df.to_dict(orient="records"),
         suppliers=get_suppliers().fillna("").to_dict(orient="records"),
-        purchases=get_purchases().fillna("").to_dict(orient="records"),
+        purchases=purchases_df.to_dict(orient="records"),
         sales=get_sales().fillna("").to_dict(orient="records"),
         low_stock=get_low_stock().fillna("").to_dict(orient="records"),
         assignments=get_assignment_history().fillna("").to_dict(orient="records"),
