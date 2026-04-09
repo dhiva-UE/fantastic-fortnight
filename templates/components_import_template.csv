@@ -1,0 +1,5 @@
+component_name,category,price,reorder_level,supplier_name,assigned_to
+Bearing A,Mechanical,120.50,5,ABC Supplies,John Doe
+Bolt M8,Hardware,12.00,20,Fasteners Hub,
+Panel X,Electrical,450.00,3,Electro Parts,Ravi Kumar
+Sensor Z,Avionics,980.75,2,Flight Systems,Anita Sharma

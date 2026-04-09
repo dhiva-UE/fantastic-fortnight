@@ -8,12 +8,14 @@ import os
 import re
 import time
 import uuid
+from io import BytesIO
 from pathlib import Path
 
 from fastapi import Depends, FastAPI, File, HTTPException, Query, UploadFile, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+import pandas as pd
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
 if str(ROOT_DIR) not in sys.path:
@@ -25,6 +27,9 @@ from database import (  # noqa: E402
     add_product,
     add_sale,
     add_supplier,
+    add_testing_checklist,
+    add_testing_checklist_item,
+    add_testing_project,
     add_user,
     create_tables,
     delete_note,
@@ -32,6 +37,7 @@ from database import (  # noqa: E402
     delete_product,
     delete_sale,
     delete_supplier,
+    delete_testing_checklist_item,
     delete_user,
     generate_product_no,
     get_assignment_history,
@@ -43,9 +49,13 @@ from database import (  # noqa: E402
     get_sales,
     get_supplier_dropdown,
     get_suppliers,
+    get_testing_checklist_items,
+    get_testing_checklists,
+    get_testing_projects,
     get_user_by_id,
     get_user_dropdown,
     get_users,
+    import_components,
     login_user,
     update_product_assignment,
     update_note,
@@ -53,6 +63,7 @@ from database import (  # noqa: E402
     update_product,
     update_sale,
     update_supplier,
+    update_testing_checklist_item,
     update_user,
 )
 try:
@@ -82,6 +93,11 @@ try:
         SupplierListResponse,
         SupplierOption,
         SupplierUpdateRequest,
+        TestingChecklistCreateRequest,
+        TestingChecklistItemCreateRequest,
+        TestingChecklistItemUpdateRequest,
+        TestingListResponse,
+        TestingProjectCreateRequest,
         UserCreateRequest,
         UserListResponse,
         UserSummary,
@@ -114,6 +130,11 @@ except ModuleNotFoundError:
         SupplierListResponse,
         SupplierOption,
         SupplierUpdateRequest,
+        TestingChecklistCreateRequest,
+        TestingChecklistItemCreateRequest,
+        TestingChecklistItemUpdateRequest,
+        TestingListResponse,
+        TestingProjectCreateRequest,
         UserCreateRequest,
         UserListResponse,
         UserSummary,
@@ -133,6 +154,13 @@ PRODUCT_IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp"}
 PRODUCT_IMAGE_CONTENT_TYPES = {"image/png", "image/jpeg", "image/webp"}
 PURCHASE_INVOICE_EXTENSIONS = {".pdf", ".png", ".jpg", ".jpeg", ".webp"}
 PURCHASE_INVOICE_CONTENT_TYPES = {"application/pdf", "image/png", "image/jpeg", "image/webp"}
+COMPONENT_IMPORT_EXTENSIONS = {".csv", ".xlsx"}
+COMPONENT_IMPORT_CONTENT_TYPES = {
+    "",
+    "text/csv",
+    "application/vnd.ms-excel",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+}
 
 
 def parse_csv_env(name: str) -> list[str]:
@@ -397,6 +425,37 @@ def build_public_file_url(file_path: str | None) -> str | None:
     return None
 
 
+def read_component_import_rows(upload_file: UploadFile) -> list[dict]:
+    original_name = sanitize_filename(upload_file.filename or "components_import")
+    suffix = Path(original_name).suffix.lower()
+    if suffix not in COMPONENT_IMPORT_EXTENSIONS:
+        raise HTTPException(status_code=400, detail="Upload a CSV or Excel (.xlsx) file.")
+
+    content_type = (upload_file.content_type or "").lower()
+    if content_type not in COMPONENT_IMPORT_CONTENT_TYPES:
+        raise HTTPException(status_code=400, detail="Unsupported import file type.")
+
+    file_bytes = upload_file.file.read(MAX_UPLOAD_BYTES + 1)
+    if not file_bytes:
+        raise HTTPException(status_code=400, detail="Uploaded file is empty")
+    if len(file_bytes) > MAX_UPLOAD_BYTES:
+        raise HTTPException(status_code=413, detail="Uploaded file exceeds the allowed size limit")
+
+    try:
+        if suffix == ".csv":
+            dataframe = pd.read_csv(BytesIO(file_bytes))
+        else:
+            dataframe = pd.read_excel(BytesIO(file_bytes))
+    except Exception as error:
+        raise HTTPException(status_code=400, detail=f"Could not read import file: {error}") from error
+
+    if dataframe.empty:
+        raise HTTPException(status_code=400, detail="The import file contains no rows")
+
+    dataframe = dataframe.rename(columns={column: str(column).strip().lower() for column in dataframe.columns})
+    return dataframe.fillna("").to_dict(orient="records")
+
+
 def build_dashboard_response() -> DashboardResponse:
     products_df = get_products()
     suppliers_df = get_suppliers()
@@ -571,6 +630,46 @@ def build_assignment_response() -> AssignmentListResponse:
     return AssignmentListResponse(
         items=assignments_df.to_dict(orient="records"),
         products=products,
+        employees=employees,
+    )
+
+
+def build_testing_response() -> TestingListResponse:
+    projects_df = get_testing_projects().fillna("")
+    checklists_df = get_testing_checklists().fillna("")
+    items_df = get_testing_checklist_items().fillna("")
+    products_df = get_product_dropdown().fillna("")
+    employees_df = get_user_dropdown().fillna("")
+
+    if not items_df.empty and "image_path" in items_df:
+        items_df["image_url"] = items_df["image_path"].apply(build_public_file_url)
+
+    products = [
+        ProductOption(
+            product_id=int(row["product_id"]),
+            product_no=str(row["product_no"]),
+            product_name=str(row["product_name"]),
+            price=float(row["price"] or 0),
+            assigned_to=str(row["assigned_to"] or ""),
+        )
+        for _, row in products_df.iterrows()
+    ]
+
+    employees = [
+        EmployeeOption(
+            user_id=int(row["user_id"]),
+            full_name=str(row["full_name"]),
+            username=str(row["username"]),
+            role=str(row["role"]),
+        )
+        for _, row in employees_df.iterrows()
+    ]
+
+    return TestingListResponse(
+        projects=projects_df.to_dict(orient="records"),
+        checklists=checklists_df.to_dict(orient="records"),
+        items=items_df.to_dict(orient="records"),
+        components=products,
         employees=employees,
     )
 
@@ -820,6 +919,67 @@ def create_assignment(payload: AssignmentCreateRequest, current_user: UserSummar
     return {"message": "Responsibility updated successfully"}
 
 
+@app.get("/testing", response_model=TestingListResponse)
+def list_testing(current_user: UserSummary = Depends(get_current_user)):
+    return build_testing_response()
+
+
+@app.post("/testing/projects")
+def create_testing_project(payload: TestingProjectCreateRequest, current_user: UserSummary = Depends(get_current_user)):
+    add_testing_project(
+        payload.project_name,
+        payload.description or "",
+        current_user.full_name,
+    )
+    return {"message": "Testing project created successfully"}
+
+
+@app.post("/testing/checklists")
+def create_testing_checklist(payload: TestingChecklistCreateRequest, current_user: UserSummary = Depends(get_current_user)):
+    add_testing_checklist(
+        payload.project_id,
+        payload.checklist_name,
+        payload.test_date,
+        payload.remarks or "",
+        current_user.full_name,
+        payload.source_checklist_id,
+    )
+    return {"message": "Testing checklist created successfully"}
+
+
+@app.post("/testing/items")
+def create_testing_item(payload: TestingChecklistItemCreateRequest, current_user: UserSummary = Depends(get_current_user)):
+    add_testing_checklist_item(
+        payload.checklist_id,
+        payload.component_id,
+        payload.issued_to or "",
+        payload.status,
+        payload.remarks or "",
+    )
+    return {"message": "Testing item added successfully"}
+
+
+@app.put("/testing/items/{checklist_item_id}")
+def edit_testing_item(
+    checklist_item_id: int,
+    payload: TestingChecklistItemUpdateRequest,
+    current_user: UserSummary = Depends(get_current_user),
+):
+    update_testing_checklist_item(
+        checklist_item_id,
+        payload.issued_to or "",
+        payload.status,
+        payload.remarks or "",
+    )
+    return {"message": "Testing item updated successfully"}
+
+
+@app.delete("/testing/items/{checklist_item_id}")
+def remove_testing_item(checklist_item_id: int, current_user: UserSummary = Depends(get_current_user)):
+    delete_testing_checklist_item(checklist_item_id)
+    return {"message": "Testing item removed successfully"}
+
+
 @app.post("/components")
 def create_component(payload: ComponentCreateRequest, current_user: UserSummary = Depends(get_current_user)):
     product_no = generate_product_no()
@@ -837,6 +997,20 @@ def create_component(payload: ComponentCreateRequest, current_user: UserSummary 
         raise HTTPException(status_code=400, detail=result)
 
     return {"message": result, "product_no": product_no}
+
+
+@app.post("/components/import")
+def import_component_file(
+    file: UploadFile = File(...),
+    current_user: UserSummary = Depends(get_current_user),
+):
+    rows = read_component_import_rows(file)
+    result = import_components(rows)
+    return {
+        "message": f"Imported {result['imported_count']} components",
+        "total_rows": len(rows),
+        **result,
+    }
 
 
 @app.put("/components/{product_id}")

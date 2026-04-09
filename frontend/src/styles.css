@@ -1093,6 +1093,89 @@ td {
   font-size: 0.95rem;
 }
 
+.testing-panel-grid {
+  align-items: start;
+}
+
+.testing-project-list {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.testing-project-button {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  width: 100%;
+  padding: 0.95rem 1rem;
+  border-radius: 16px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.028);
+  color: rgba(234, 244, 251, 0.94);
+  cursor: pointer;
+  transition: border-color 140ms ease, background 140ms ease, transform 140ms ease;
+}
+
+.testing-project-button strong,
+.testing-project-button span {
+  pointer-events: none;
+}
+
+.testing-project-button span {
+  color: rgba(223, 238, 248, 0.66);
+  font-size: 0.92rem;
+}
+
+.testing-project-button:hover,
+.testing-project-button.active {
+  border-color: rgba(255, 153, 61, 0.35);
+  background: rgba(255, 153, 61, 0.08);
+  transform: translateY(-1px);
+}
+
+.testing-summary-grid {
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+}
+
+.testing-row-active {
+  background: rgba(255, 153, 61, 0.09) !important;
+}
+
+.testing-status-chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 110px;
+  padding: 0.3rem 0.7rem;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.04);
+  color: rgba(234, 244, 251, 0.95);
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
+.testing-status-chip.out-for-testing {
+  border-color: rgba(255, 193, 94, 0.32);
+  background: rgba(255, 193, 94, 0.12);
+}
+
+.testing-status-chip.returned-ok {
+  border-color: rgba(67, 201, 135, 0.34);
+  background: rgba(67, 201, 135, 0.12);
+}
+
+.testing-status-chip.damaged {
+  border-color: rgba(255, 133, 82, 0.34);
+  background: rgba(255, 133, 82, 0.13);
+}
+
+.testing-status-chip.lost {
+  border-color: rgba(244, 92, 125, 0.34);
+  background: rgba(244, 92, 125, 0.13);
+}
+
 .media-preview-shell {
   border-radius: 22px;
   border: 1px solid rgba(255, 153, 61, 0.16);
@@ -1172,6 +1255,29 @@ td {
 
 .toast-card span {
   color: rgba(234, 244, 251, 0.82);
+}
+
+.import-summary {
+  display: grid;
+  gap: 0.3rem;
+  margin-top: 1rem;
+  padding: 0.95rem 1rem;
+  border-radius: 18px;
+  border: 1px solid rgba(255, 171, 92, 0.18);
+  background: rgba(255, 255, 255, 0.03);
+  color: rgba(234, 244, 251, 0.9);
+}
+
+.import-summary strong {
+  color: #fff;
+}
+
+.import-errors {
+  margin-top: 0.35rem;
+  display: grid;
+  gap: 0.2rem;
+  color: rgba(255, 204, 170, 0.92);
+  font-size: 0.92rem;
 }
 
 .permission-checkbox {
@@ -1278,6 +1384,10 @@ td {
   .metrics-grid,
   .panel-grid {
     grid-template-columns: 1fr;
+  }
+
+  .testing-summary-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .form-grid {

@@ -193,6 +193,17 @@ export async function uploadPurchaseInvoice(file) {
   });
 }
 
+export async function importComponentsFile(file) {
+  const formData = new FormData();
+  formData.append("file", file);
+  return apiRequest("/api/components/import", {
+    method: "POST",
+    body: formData,
+    isFormData: true,
+    fallbackMessage: "Failed to import components"
+  });
+}
+
 export async function createSupplier(payload) {
   return apiRequest("/api/suppliers", { method: "POST", body: payload, fallbackMessage: "Failed to create supplier" });
 }
@@ -211,6 +222,30 @@ export async function fetchAssignments() {
 
 export async function createAssignment(payload) {
   return apiRequest("/api/assignments", { method: "POST", body: payload, fallbackMessage: "Failed to update responsibility" });
+}
+
+export async function fetchTesting() {
+  return apiRequest("/api/testing", { fallbackMessage: "Failed to load testing data" });
+}
+
+export async function createTestingProject(payload) {
+  return apiRequest("/api/testing/projects", { method: "POST", body: payload, fallbackMessage: "Failed to create testing project" });
+}
+
+export async function createTestingChecklist(payload) {
+  return apiRequest("/api/testing/checklists", { method: "POST", body: payload, fallbackMessage: "Failed to create testing checklist" });
+}
+
+export async function createTestingChecklistItem(payload) {
+  return apiRequest("/api/testing/items", { method: "POST", body: payload, fallbackMessage: "Failed to add testing component" });
+}
+
+export async function updateTestingChecklistItem(checklistItemId, payload) {
+  return apiRequest(`/api/testing/items/${checklistItemId}`, { method: "PUT", body: payload, fallbackMessage: "Failed to update testing component" });
+}
+
+export async function deleteTestingChecklistItem(checklistItemId) {
+  return apiRequest(`/api/testing/items/${checklistItemId}`, { method: "DELETE", fallbackMessage: "Failed to remove testing component" });
 }
 
 export async function createComponent(payload) {

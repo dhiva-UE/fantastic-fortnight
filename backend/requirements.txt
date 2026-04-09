@@ -2,3 +2,6 @@ fastapi
 uvicorn[standard]
 pydantic
 python-multipart
+pandas
+psycopg2-binary
+openpyxl

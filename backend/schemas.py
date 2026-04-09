@@ -216,6 +216,41 @@ class AssignmentListResponse(BaseModel):
     employees: list[EmployeeOption]
 
 
+class TestingProjectCreateRequest(BaseModel):
+    project_name: str
+    description: str | None = ""
+
+
+class TestingChecklistCreateRequest(BaseModel):
+    project_id: int
+    checklist_name: str
+    test_date: str
+    remarks: str | None = ""
+    source_checklist_id: int | None = None
+
+
+class TestingChecklistItemCreateRequest(BaseModel):
+    checklist_id: int
+    component_id: int
+    issued_to: str | None = ""
+    status: str = "Out for Testing"
+    remarks: str | None = ""
+
+
+class TestingChecklistItemUpdateRequest(BaseModel):
+    issued_to: str | None = ""
+    status: str
+    remarks: str | None = ""
+
+
+class TestingListResponse(BaseModel):
+    projects: list[dict]
+    checklists: list[dict]
+    items: list[dict]
+    components: list[ProductOption]
+    employees: list[EmployeeOption]
+
+
 class ReportsResponse(BaseModel):
     products: list[dict]
     suppliers: list[dict]

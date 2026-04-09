@@ -8,12 +8,16 @@ import {
   createPurchase,
   createSale,
   createSupplier,
+  createTestingChecklist,
+  createTestingChecklistItem,
+  createTestingProject,
   createUser,
   deleteComponent,
   deleteNote,
   deletePurchase,
   deleteSale,
   deleteSupplier,
+  deleteTestingChecklistItem,
   deleteUser,
   fetchComponents,
   fetchDashboard,
@@ -22,9 +26,11 @@ import {
   fetchPurchases,
   fetchSales,
   fetchSuppliers,
+  fetchTesting,
   fetchUsers,
   fetchReports,
   getStoredAuthSession,
+  importComponentsFile,
   login,
   saveAuthSession,
   uploadProductImage,
@@ -34,6 +40,7 @@ import {
   updatePurchase,
   updateSale,
   updateSupplier,
+  updateTestingChecklistItem,
   updateUser
 } from "./api";
 import inboundOfficialLogo from "./assets/inbound-official-logo.png";
@@ -442,9 +449,7 @@ function DashboardView({ dashboard }) {
       <section className="metrics-grid">
         <MetricCard label="Components" value={metrics?.total_components ?? 0} />
         <MetricCard label="Suppliers" value={metrics?.total_suppliers ?? 0} />
-        <MetricCard label="Stock Qty" value={metrics?.total_stock_qty ?? 0} />
         <MetricCard label="Employees" value={metrics?.total_employees ?? 0} />
-        <MetricCard label="Inventory Value" value={formatCurrency(metrics?.inventory_value)} />
         <MetricCard label="Purchase Value" value={formatCurrency(metrics?.total_purchase_value)} />
       </section>
 
@@ -504,6 +509,74 @@ function FilePickerField({ label, accept, onChange, selectedFileName, previewUrl
         ) : null}
       </div>
     </div>
+  );
+}
+
+function ComponentImportPanel({ onImportComplete, onSuccess }) {
+  const [selectedFile, setSelectedFile] = useState(null);
+  const [importing, setImporting] = useState(false);
+  const [error, setError] = useState("");
+  const [summary, setSummary] = useState(null);
+
+  const submitImport = async () => {
+    if (!selectedFile) {
+      setError("Choose a CSV or Excel file to import.");
+      return;
+    }
+
+    setImporting(true);
+    setError("");
+    try {
+      const result = await importComponentsFile(selectedFile);
+      setSummary(result);
+      setSelectedFile(null);
+      onSuccess?.(result.message || "Components imported successfully.");
+      await onImportComplete?.();
+    } catch (importError) {
+      setError(importError.message);
+    } finally {
+      setImporting(false);
+    }
+  };
+
+  return (
+    <section className="panel component-form-panel">
+      <div className="panel-header split-header">
+        <div>
+          <h3>Bulk Import Components</h3>
+          <p className="panel-copy">Upload a CSV or Excel file with columns like component_name, category, price, reorder_level, supplier_name, and assigned_to.</p>
+        </div>
+      </div>
+      {error ? <div className="error-banner inline-banner">{error}</div> : null}
+      <div className="form-grid">
+        <FilePickerField
+          label="Import File"
+          accept=".csv,.xlsx"
+          selectedFileName={selectedFile?.name}
+          onChange={setSelectedFile}
+        />
+        <div className="full-span form-actions">
+          <button className="form-submit-button" type="button" onClick={submitImport} disabled={importing}>
+            {importing ? "Importing..." : "Import Components"}
+          </button>
+        </div>
+      </div>
+      {summary ? (
+        <div className="import-summary">
+          <strong>{summary.message}</strong>
+          <span>Total rows: {summary.total_rows}</span>
+          <span>Imported: {summary.imported_count}</span>
+          <span>Failed: {summary.failed_count}</span>
+          {summary.errors?.length ? (
+            <div className="import-errors">
+              {summary.errors.map((item) => (
+                <div key={item}>{item}</div>
+              ))}
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+    </section>
   );
 }
 
@@ -682,7 +755,7 @@ function ComponentForm({ suppliers, employees, selectedComponent, onSubmit, savi
   );
 }
 
-function ComponentsView({ componentsPayload, onRefresh, onConfirm }) {
+function ComponentsView({ componentsPayload, onRefresh, onConfirm, onSuccess }) {
   const [selectedComponentId, setSelectedComponentId] = useState(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
@@ -779,6 +852,7 @@ function ComponentsView({ componentsPayload, onRefresh, onConfirm }) {
         saving={saving}
         onCancel={() => setSelectedComponentId(null)}
       />
+      <ComponentImportPanel onImportComplete={onRefresh} onSuccess={onSuccess} />
 
       <section className="panel">
         <div className="panel-header split-header">
@@ -2300,6 +2374,537 @@ function ReportsView({ reportsPayload }) {
   );
 }
 
+function TestingView({ testingPayload, onRefresh, onConfirm, onSuccess }) {
+  const [selectedProjectId, setSelectedProjectId] = useState("");
+  const [selectedChecklistId, setSelectedChecklistId] = useState("");
+  const [selectedItemId, setSelectedItemId] = useState(null);
+  const [projectForm, setProjectForm] = useState({ project_name: "", description: "" });
+  const [checklistForm, setChecklistForm] = useState({ project_id: "", checklist_name: "", test_date: new Date().toISOString().slice(0, 10), remarks: "", source_checklist_id: "" });
+  const [itemForm, setItemForm] = useState({ checklist_id: "", component_id: "", issued_to: "", status: "Out for Testing", remarks: "" });
+  const [searchValue, setSearchValue] = useState("");
+  const [statusFilter, setStatusFilter] = useState("all");
+  const [savingProject, setSavingProject] = useState(false);
+  const [savingChecklist, setSavingChecklist] = useState(false);
+  const [savingItem, setSavingItem] = useState(false);
+  const [error, setError] = useState("");
+
+  const projects = testingPayload?.projects ?? [];
+  const checklists = testingPayload?.checklists ?? [];
+  const items = testingPayload?.items ?? [];
+  const components = testingPayload?.components ?? [];
+  const employees = testingPayload?.employees ?? [];
+
+  useEffect(() => {
+    if (!projects.length) {
+      setSelectedProjectId("");
+      return;
+    }
+
+    const currentExists = projects.some((project) => String(project.project_id) === String(selectedProjectId));
+    if (!currentExists) {
+      setSelectedProjectId(String(projects[0].project_id));
+    }
+  }, [projects, selectedProjectId]);
+
+  const projectChecklists = useMemo(
+    () => checklists.filter((checklist) => String(checklist.project_id) === String(selectedProjectId)),
+    [checklists, selectedProjectId]
+  );
+
+  const checklistProjectChecklists = useMemo(
+    () => checklists.filter((checklist) => String(checklist.project_id) === String(checklistForm.project_id)),
+    [checklists, checklistForm.project_id]
+  );
+
+  useEffect(() => {
+    if (!projectChecklists.length) {
+      setSelectedChecklistId("");
+      return;
+    }
+
+    const currentExists = projectChecklists.some((checklist) => String(checklist.checklist_id) === String(selectedChecklistId));
+    if (!currentExists) {
+      setSelectedChecklistId(String(projectChecklists[0].checklist_id));
+    }
+  }, [projectChecklists, selectedChecklistId]);
+
+  const selectedProject = useMemo(
+    () => projects.find((project) => String(project.project_id) === String(selectedProjectId)) || null,
+    [projects, selectedProjectId]
+  );
+
+  const selectedChecklist = useMemo(
+    () => checklists.find((checklist) => String(checklist.checklist_id) === String(selectedChecklistId)) || null,
+    [checklists, selectedChecklistId]
+  );
+
+  const selectedItem = useMemo(
+    () => items.find((item) => Number(item.checklist_item_id) === Number(selectedItemId)) || null,
+    [items, selectedItemId]
+  );
+
+  useEffect(() => {
+    setChecklistForm((current) => ({
+      ...current,
+      project_id: selectedProjectId || current.project_id || ""
+    }));
+  }, [selectedProjectId]);
+
+  useEffect(() => {
+    setItemForm((current) => ({
+      ...current,
+      checklist_id: selectedChecklistId || current.checklist_id || "",
+      component_id: selectedItem?.component_id ?? current.component_id ?? components[0]?.product_id ?? "",
+      issued_to: selectedItem?.issued_to ?? "",
+      status: selectedItem?.status ?? "Out for Testing",
+      remarks: selectedItem?.remarks ?? ""
+    }));
+  }, [selectedChecklistId, selectedItem, components]);
+
+  useEffect(() => {
+    if (selectedItemId !== null) {
+      scrollPageToTop();
+    }
+  }, [selectedItemId]);
+
+  const selectedChecklistItems = useMemo(
+    () => items.filter((item) => String(item.checklist_id) === String(selectedChecklistId)),
+    [items, selectedChecklistId]
+  );
+
+  const filteredItems = useMemo(() => {
+    const normalized = searchValue.trim().toLowerCase();
+    return selectedChecklistItems.filter((item) => {
+      const matchesStatus = statusFilter === "all" || item.status === statusFilter;
+      const matchesSearch = !normalized || [
+        item.product_no,
+        item.product_name,
+        item.category,
+        item.issued_to,
+        item.status,
+        item.remarks
+      ].some((value) => getCellDisplayValue(value).toLowerCase().includes(normalized));
+
+      return matchesStatus && matchesSearch;
+    });
+  }, [searchValue, selectedChecklistItems, statusFilter]);
+
+  const summary = useMemo(() => ({
+    total: selectedChecklistItems.length,
+    out: selectedChecklistItems.filter((item) => item.status === "Out for Testing").length,
+    returned: selectedChecklistItems.filter((item) => item.status === "Returned OK").length,
+    damaged: selectedChecklistItems.filter((item) => item.status === "Damaged").length,
+    lost: selectedChecklistItems.filter((item) => item.status === "Lost").length
+  }), [selectedChecklistItems]);
+
+  const componentOptions = components.map((component) => ({
+    value: component.product_id,
+    label: `${component.product_no} - ${component.product_name}`
+  }));
+
+  const employeeOptions = employees.map((employee) => ({
+    value: employee.full_name,
+    label: `${employee.full_name} (${employee.role})`
+  }));
+
+  const duplicateOptions = checklistProjectChecklists
+    .filter((checklist) => String(checklist.checklist_id) !== String(selectedChecklistId))
+    .map((checklist) => ({
+      value: checklist.checklist_id,
+      label: `${checklist.checklist_name} (${checklist.test_date})`
+    }));
+
+  const submitProject = async (event) => {
+    event.preventDefault();
+    setSavingProject(true);
+    setError("");
+    try {
+      await createTestingProject(projectForm);
+      onSuccess?.("Testing project created successfully.");
+      setProjectForm({ project_name: "", description: "" });
+      await onRefresh();
+    } catch (submitError) {
+      setError(submitError.message);
+    } finally {
+      setSavingProject(false);
+    }
+  };
+
+  const submitChecklist = async (event) => {
+    event.preventDefault();
+    setSavingChecklist(true);
+    setError("");
+    try {
+      await createTestingChecklist({
+        ...checklistForm,
+        project_id: Number(checklistForm.project_id),
+        source_checklist_id: checklistForm.source_checklist_id ? Number(checklistForm.source_checklist_id) : null
+      });
+      onSuccess?.("Testing checklist created successfully.");
+      setSelectedProjectId(String(checklistForm.project_id));
+      setSelectedChecklistId("");
+      setChecklistForm((current) => ({
+        ...current,
+        checklist_name: "",
+        remarks: "",
+        source_checklist_id: ""
+      }));
+      await onRefresh();
+    } catch (submitError) {
+      setError(submitError.message);
+    } finally {
+      setSavingChecklist(false);
+    }
+  };
+
+  const submitItem = async (event) => {
+    event.preventDefault();
+    setSavingItem(true);
+    setError("");
+    try {
+      const payload = {
+        checklist_id: Number(itemForm.checklist_id),
+        component_id: Number(itemForm.component_id),
+        issued_to: itemForm.issued_to,
+        status: itemForm.status,
+        remarks: itemForm.remarks
+      };
+
+      if (selectedItem) {
+        await updateTestingChecklistItem(selectedItem.checklist_item_id, {
+          issued_to: payload.issued_to,
+          status: payload.status,
+          remarks: payload.remarks
+        });
+        onSuccess?.("Testing item updated successfully.");
+      } else {
+        await createTestingChecklistItem(payload);
+        onSuccess?.("Testing component added successfully.");
+      }
+
+      setSelectedItemId(null);
+      setItemForm({
+        checklist_id: selectedChecklistId || "",
+        component_id: components[0]?.product_id ?? "",
+        issued_to: "",
+        status: "Out for Testing",
+        remarks: ""
+      });
+      await onRefresh();
+    } catch (submitError) {
+      setError(submitError.message);
+    } finally {
+      setSavingItem(false);
+    }
+  };
+
+  const removeItem = async (checklistItemId) => {
+    const confirmed = await onConfirm({
+      title: "Remove Testing Item",
+      message: "Remove this component from the checklist?",
+      confirmLabel: "Remove",
+      danger: true
+    });
+    if (!confirmed) return;
+
+    setError("");
+    try {
+      await deleteTestingChecklistItem(checklistItemId);
+      onSuccess?.("Testing item removed successfully.");
+      if (Number(selectedItemId) === Number(checklistItemId)) {
+        setSelectedItemId(null);
+      }
+      await onRefresh();
+    } catch (deleteError) {
+      setError(deleteError.message);
+    }
+  };
+
+  return (
+    <>
+      <header className="hero compact-hero">
+        <div>
+          <p className="eyebrow">Testing Operations</p>
+          <h1>Testing Module</h1>
+          <p>Create project-based testing checklists, duplicate earlier runs, and track what returned, got damaged, or went missing.</p>
+        </div>
+      </header>
+
+      {error ? <div className="error-banner inline-banner">{error}</div> : null}
+
+      <section className="panel-grid testing-panel-grid">
+        <section className="panel component-form-panel">
+          <div className="panel-header split-header">
+            <div>
+              <h3>Create Project</h3>
+              <p className="panel-copy">Keep repeated testing days grouped under one project name.</p>
+            </div>
+          </div>
+          <form className="form-grid" onSubmit={submitProject}>
+            <label>
+              Project Name
+              <input value={projectForm.project_name} onChange={(event) => setProjectForm((current) => ({ ...current, project_name: event.target.value }))} required />
+            </label>
+            <label>
+              Description
+              <input value={projectForm.description} onChange={(event) => setProjectForm((current) => ({ ...current, description: event.target.value }))} />
+            </label>
+            <div className="full-span form-actions">
+              <button className="form-submit-button" type="submit" disabled={savingProject}>{savingProject ? "Saving..." : "Create Project"}</button>
+            </div>
+          </form>
+        </section>
+
+        <section className="panel">
+          <div className="panel-header">
+            <div>
+              <h3>Projects</h3>
+              <p className="panel-copy">Select a project to review its checklists and testing history.</p>
+            </div>
+          </div>
+          <div className="testing-project-list">
+            {projects.length === 0 ? (
+              <p className="panel-copy">No projects yet.</p>
+            ) : projects.map((project) => (
+              <button
+                key={project.project_id}
+                type="button"
+                className={`testing-project-button ${String(project.project_id) === String(selectedProjectId) ? "active" : ""}`}
+                onClick={() => setSelectedProjectId(String(project.project_id))}
+              >
+                <strong>{project.project_name}</strong>
+                <span>{project.checklist_count || 0} checklist(s)</span>
+              </button>
+            ))}
+          </div>
+        </section>
+      </section>
+
+      <section className="panel component-form-panel">
+        <div className="panel-header split-header">
+          <div>
+            <h3>Create Testing Checklist</h3>
+            <p className="panel-copy">Create a fresh checklist or duplicate a previous one from the same project.</p>
+          </div>
+        </div>
+        <form className="form-grid" onSubmit={submitChecklist}>
+          <label>
+            Project
+            <select value={checklistForm.project_id} onChange={(event) => setChecklistForm((current) => ({ ...current, project_id: event.target.value, source_checklist_id: "" }))} required>
+              <option value="">Select project</option>
+              {projects.map((project) => (
+                <option key={project.project_id} value={project.project_id}>{project.project_name}</option>
+              ))}
+            </select>
+          </label>
+          <label>
+            Checklist Name
+            <input value={checklistForm.checklist_name} onChange={(event) => setChecklistForm((current) => ({ ...current, checklist_name: event.target.value }))} placeholder="Example: Thermal test - Day 3" required />
+          </label>
+          <label>
+            Test Date
+            <input type="date" value={checklistForm.test_date} onChange={(event) => setChecklistForm((current) => ({ ...current, test_date: event.target.value }))} required />
+          </label>
+          <label>
+            Duplicate From
+            <select value={checklistForm.source_checklist_id} onChange={(event) => setChecklistForm((current) => ({ ...current, source_checklist_id: event.target.value }))}>
+              <option value="">Create Empty Checklist</option>
+              {duplicateOptions.map((option) => (
+                <option key={option.value} value={option.value}>{option.label}</option>
+              ))}
+            </select>
+          </label>
+          <label className="full-span">
+            Remarks
+            <textarea className="notes-textarea" value={checklistForm.remarks} onChange={(event) => setChecklistForm((current) => ({ ...current, remarks: event.target.value }))} />
+          </label>
+          <div className="full-span form-actions">
+            <button className="form-submit-button" type="submit" disabled={savingChecklist || !projects.length}>
+              {savingChecklist ? "Saving..." : "Create Checklist"}
+            </button>
+          </div>
+        </form>
+      </section>
+
+      <section className="panel">
+        <div className="panel-header split-header">
+          <div>
+            <h3>Project Checklists</h3>
+            <p className="panel-copy">{selectedProject ? `Showing checklists under ${selectedProject.project_name}.` : "Select a project to view checklists."}</p>
+          </div>
+        </div>
+        <div className="table-shell">
+          <table>
+            <thead>
+              <tr>
+                <th>Checklist</th>
+                <th>Date</th>
+                <th>Copied From</th>
+                <th>Items</th>
+                <th>Created By</th>
+                <th>Remarks</th>
+              </tr>
+            </thead>
+            <tbody>
+              {projectChecklists.length === 0 ? (
+                <tr><td colSpan="6" className="empty-state-cell">No checklists available for this project</td></tr>
+              ) : projectChecklists.map((checklist) => (
+                <tr
+                  key={checklist.checklist_id}
+                  className={String(checklist.checklist_id) === String(selectedChecklistId) ? "testing-row-active" : ""}
+                  onClick={() => setSelectedChecklistId(String(checklist.checklist_id))}
+                >
+                  <td>{checklist.checklist_name}</td>
+                  <td>{checklist.test_date}</td>
+                  <td>{checklist.source_checklist_name || "-"}</td>
+                  <td>{checklist.item_count}</td>
+                  <td>{checklist.created_by || "-"}</td>
+                  <td>{checklist.remarks || "-"}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section className="metrics-grid testing-summary-grid">
+        <MetricCard label="Checklist Items" value={summary.total} />
+        <MetricCard label="Out For Testing" value={summary.out} />
+        <MetricCard label="Returned OK" value={summary.returned} />
+        <MetricCard label="Damaged" value={summary.damaged} />
+        <MetricCard label="Lost" value={summary.lost} />
+      </section>
+
+      <section className="panel component-form-panel">
+        <div className="panel-header split-header">
+          <div>
+            <h3>{selectedItem ? "Update Testing Item" : "Add Component To Checklist"}</h3>
+            <p className="panel-copy">
+              {selectedChecklist ? `Checklist: ${selectedChecklist.checklist_name} (${selectedChecklist.test_date})` : "Select a checklist before adding components."}
+            </p>
+          </div>
+          {selectedItem ? <button className="ghost-button slim" type="button" onClick={() => setSelectedItemId(null)}>Cancel</button> : null}
+        </div>
+        <form className="form-grid" onSubmit={submitItem}>
+          <label>
+            Checklist
+            <select value={itemForm.checklist_id} onChange={(event) => setItemForm((current) => ({ ...current, checklist_id: event.target.value }))} required>
+              <option value="">Select checklist</option>
+              {projectChecklists.map((checklist) => (
+                <option key={checklist.checklist_id} value={checklist.checklist_id}>{checklist.checklist_name}</option>
+              ))}
+            </select>
+          </label>
+          <label>
+            Component
+            <SearchableSelect
+              options={componentOptions}
+              value={itemForm.component_id}
+              onChange={(nextValue) => setItemForm((current) => ({ ...current, component_id: nextValue }))}
+              placeholder="Search component"
+              disabled={Boolean(selectedItem)}
+            />
+          </label>
+          <label>
+            Issued To
+            <SearchableSelect
+              options={employeeOptions}
+              value={itemForm.issued_to}
+              onChange={(nextValue) => setItemForm((current) => ({ ...current, issued_to: nextValue }))}
+              placeholder="Search employee"
+              allowEmpty
+              emptyLabel="Not Assigned"
+            />
+          </label>
+          <label>
+            Status
+            <select value={itemForm.status} onChange={(event) => setItemForm((current) => ({ ...current, status: event.target.value }))}>
+              <option value="Out for Testing">Out for Testing</option>
+              <option value="Returned OK">Returned OK</option>
+              <option value="Damaged">Damaged</option>
+              <option value="Lost">Lost</option>
+            </select>
+          </label>
+          <label className="full-span">
+            Remarks
+            <textarea className="notes-textarea" value={itemForm.remarks} onChange={(event) => setItemForm((current) => ({ ...current, remarks: event.target.value }))} />
+          </label>
+          <div className="full-span form-actions">
+            <button className="form-submit-button" type="submit" disabled={savingItem || !itemForm.checklist_id}>
+              {savingItem ? "Saving..." : selectedItem ? "Update Testing Item" : "Add To Checklist"}
+            </button>
+          </div>
+        </form>
+      </section>
+
+      <section className="panel">
+        <div className="panel-header split-header">
+          <div>
+            <h3>Checklist Items</h3>
+            <p className="panel-copy">Track every component in the selected checklist and update the return outcome.</p>
+          </div>
+        </div>
+        <div className="report-toolbar">
+          <div className="report-filter-row">
+            <label className="report-filter-field">
+              Status
+              <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}>
+                <option value="all">All Status</option>
+                <option value="Out for Testing">Out for Testing</option>
+                <option value="Returned OK">Returned OK</option>
+                <option value="Damaged">Damaged</option>
+                <option value="Lost">Lost</option>
+              </select>
+            </label>
+            <label className="report-filter-field report-filter-search">
+              Search
+              <input value={searchValue} onChange={(event) => setSearchValue(event.target.value)} placeholder="Search component, assignee, status or remarks" />
+            </label>
+          </div>
+          <p className="report-filter-meta">Showing {filteredItems.length} of {selectedChecklistItems.length} rows</p>
+        </div>
+        <div className="table-shell">
+          <table>
+            <thead>
+              <tr>
+                <th>Component</th>
+                <th>Category</th>
+                <th>Issued To</th>
+                <th>Status</th>
+                <th>Returned At</th>
+                <th>Image</th>
+                <th>Remarks</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {filteredItems.length === 0 ? (
+                <tr><td colSpan="8" className="empty-state-cell">No checklist items available</td></tr>
+              ) : filteredItems.map((item) => (
+                <tr key={item.checklist_item_id}>
+                  <td>{item.product_no} - {item.product_name}</td>
+                  <td>{item.category || "-"}</td>
+                  <td>{item.issued_to || "-"}</td>
+                  <td><span className={`testing-status-chip ${String(item.status).toLowerCase().replace(/[^a-z0-9]+/g, "-")}`}>{item.status}</span></td>
+                  <td>{item.returned_at || "-"}</td>
+                  <td>{item.image_url ? <button className="ghost-button slim" type="button" onClick={() => openFileInNewTab(item.image_url)}>View Image</button> : "-"}</td>
+                  <td>{item.remarks || "-"}</td>
+                  <td>
+                    <div className="row-actions">
+                      <button className="ghost-button slim" type="button" onClick={() => setSelectedItemId(item.checklist_item_id)}>Edit</button>
+                      <button className="danger-button slim" type="button" onClick={() => removeItem(item.checklist_item_id)}>Remove</button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </>
+  );
+}
+
 function buildInitialComponentFormState(suppliers, selectedComponent) {
   const defaultSupplier = suppliers[0]?.supplier_id ?? "";
   return {
@@ -2402,6 +3007,7 @@ export default function App() {
   const [salesPayload, setSalesPayload] = useState(null);
   const [notesPayload, setNotesPayload] = useState(null);
   const [reportsPayload, setReportsPayload] = useState(null);
+  const [testingPayload, setTestingPayload] = useState(null);
   const [usersPayload, setUsersPayload] = useState(null);
   const [activeView, setActiveView] = useState("dashboard");
   const [loading, setLoading] = useState(false);
@@ -2462,6 +3068,11 @@ export default function App() {
     setAssignmentsPayload(payload);
   };
 
+  const loadTesting = async () => {
+    const payload = await fetchTesting();
+    setTestingPayload(payload);
+  };
+
   const loadSuppliers = async () => {
     const payload = await fetchSuppliers();
     setSuppliersPayload(payload);
@@ -2498,7 +3109,7 @@ export default function App() {
   };
 
   const refreshOperationalData = async () => {
-    await Promise.all([loadDashboard(), loadSuppliers(), loadComponents(), loadAssignments(), loadPurchases(), loadSales(), loadNotes(), loadUsers(), loadReports()]);
+    await Promise.all([loadDashboard(), loadSuppliers(), loadComponents(), loadAssignments(), loadTesting(), loadPurchases(), loadSales(), loadNotes(), loadUsers(), loadReports()]);
   };
 
   useEffect(() => {
@@ -2529,6 +3140,12 @@ export default function App() {
       setActiveView("dashboard");
     }
   }, [activeView, canAccessUsers]);
+
+  useEffect(() => {
+    if (activeView === "sales" || activeView === "notes") {
+      setActiveView("dashboard");
+    }
+  }, [activeView]);
 
   const handleLogin = async (username, password) => {
     setLoading(true);
@@ -2568,14 +3185,13 @@ export default function App() {
         </div>
         <nav className="nav-list">
           <button className={`nav-item ${activeView === "dashboard" ? "active" : ""}`} onClick={() => setActiveView("dashboard")}>Dashboard</button>
-          <button className={`nav-item ${activeView === "suppliers" ? "active" : ""}`} onClick={() => setActiveView("suppliers")}>Suppliers</button>
-          <button className={`nav-item ${activeView === "components" ? "active" : ""}`} onClick={() => setActiveView("components")}>Components</button>
-          <button className={`nav-item ${activeView === "assignments" ? "active" : ""}`} onClick={() => setActiveView("assignments")}>Components Responsibility</button>
-          <button className={`nav-item ${activeView === "purchases" ? "active" : ""}`} onClick={() => setActiveView("purchases")}>Purchases</button>
-          <button className={`nav-item ${activeView === "sales" ? "active" : ""}`} onClick={() => setActiveView("sales")}>Sales</button>
-          <button className={`nav-item ${activeView === "notes" ? "active" : ""}`} onClick={() => setActiveView("notes")}>Notes</button>
-          {canAccessUsers ? <button className={`nav-item ${activeView === "users" ? "active" : ""}`} onClick={() => setActiveView("users")}>Users</button> : null}
-          <button className={`nav-item ${activeView === "reports" ? "active" : ""}`} onClick={() => setActiveView("reports")}>Reports</button>
+            <button className={`nav-item ${activeView === "suppliers" ? "active" : ""}`} onClick={() => setActiveView("suppliers")}>Suppliers</button>
+            <button className={`nav-item ${activeView === "components" ? "active" : ""}`} onClick={() => setActiveView("components")}>Components</button>
+            <button className={`nav-item ${activeView === "testing" ? "active" : ""}`} onClick={() => setActiveView("testing")}>Testing</button>
+            <button className={`nav-item ${activeView === "assignments" ? "active" : ""}`} onClick={() => setActiveView("assignments")}>Components Responsibility</button>
+            <button className={`nav-item ${activeView === "purchases" ? "active" : ""}`} onClick={() => setActiveView("purchases")}>Purchases</button>
+            {canAccessUsers ? <button className={`nav-item ${activeView === "users" ? "active" : ""}`} onClick={() => setActiveView("users")}>Users</button> : null}
+            <button className={`nav-item ${activeView === "reports" ? "active" : ""}`} onClick={() => setActiveView("reports")}>Reports</button>
         </nav>
         <div className="sidebar-user">
           <div>
@@ -2593,6 +3209,7 @@ export default function App() {
             setSalesPayload(null);
             setNotesPayload(null);
             setReportsPayload(null);
+            setTestingPayload(null);
             setUsersPayload(null);
             setError("");
             setActiveView("dashboard");
@@ -2616,11 +3233,10 @@ export default function App() {
         {error ? <div className="error-banner inline-banner">{error}</div> : null}
         {activeView === "dashboard" ? <DashboardView dashboard={dashboard} /> : null}
         {activeView === "suppliers" ? <SuppliersView suppliersPayload={suppliersPayload} onRefresh={refreshOperationalData} onConfirm={requestConfirm} /> : null}
-        {activeView === "components" ? <ComponentsView componentsPayload={componentsPayload} onRefresh={refreshOperationalData} onConfirm={requestConfirm} /> : null}
+        {activeView === "components" ? <ComponentsView componentsPayload={componentsPayload} onRefresh={refreshOperationalData} onConfirm={requestConfirm} onSuccess={setToastMessage} /> : null}
+        {activeView === "testing" ? <TestingView testingPayload={testingPayload} onRefresh={refreshOperationalData} onConfirm={requestConfirm} onSuccess={setToastMessage} /> : null}
         {activeView === "assignments" ? <AssignmentsView assignmentsPayload={assignmentsPayload} onRefresh={refreshOperationalData} /> : null}
         {activeView === "purchases" ? <PurchasesView purchasesPayload={purchasesPayload} onRefresh={refreshOperationalData} onConfirm={requestConfirm} onSuccess={setToastMessage} /> : null}
-        {activeView === "sales" ? <SalesView salesPayload={salesPayload} onRefresh={refreshOperationalData} onConfirm={requestConfirm} /> : null}
-        {activeView === "notes" ? <NotesView notesPayload={notesPayload} currentUser={user} onRefresh={refreshOperationalData} onConfirm={requestConfirm} /> : null}
         {activeView === "users" && canAccessUsers ? <UsersView usersPayload={usersPayload} currentUser={user} onRefresh={refreshOperationalData} onConfirm={requestConfirm} onSuccess={setToastMessage} /> : null}
         {activeView === "reports" ? <ReportsView reportsPayload={reportsPayload} /> : null}
       </section>

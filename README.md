@@ -1,48 +1,68 @@
 # Inbound Inventory
 
-Simple inbound inventory management software built with Streamlit.
+Inbound inventory management software with a React frontend and FastAPI backend.
 
-## Features
+The default project setup is now offline/local using SQLite on the same computer.
 
-- Product and supplier management
-- Purchase and sales tracking
-- Assignment history
-- Notes and reports
-- PostgreSQL or SQLite backend support
+## Stack
 
-## Setup
+- `frontend/`: React + Vite
+- `backend/`: FastAPI API
+- `database.py`: shared database access layer for PostgreSQL or SQLite
 
-1. Install Python 3.10+.
-2. Install dependencies:
+## Local development
 
-```bash
-pip install -r requirements.txt
+1. Create `.env` from [.env.example](C:/Inventory_managment_tool/Inbound_Inventory/.env.example), or use the existing `.env`.
+2. For offline/local mode, keep:
+
+```env
+DB_BACKEND=sqlite
 ```
 
-3. Create a local environment file from the example:
+3. Install backend dependencies:
 
 ```bash
-copy .env.example .env
+pip install -r backend/requirements.txt
 ```
 
-4. Edit `.env` with your database settings.
-
-5. Start the app:
+4. Install frontend dependencies:
 
 ```bash
-streamlit run app.py
+cd frontend
+npm install
 ```
 
-## Multi-computer access
+5. Start the backend:
 
-For multiple users, use PostgreSQL as the shared database and configure shared folders for:
+```bash
+uvicorn backend.main:app --host 127.0.0.1 --port 8000 --reload
+```
 
-- `PRODUCT_IMAGES_DIR`
-- `PURCHASE_INVOICES_DIR`
+6. Start the frontend in another terminal:
 
-See `POSTGRES_SETUP.md` for details.
+```bash
+cd frontend
+npm run dev
+```
 
-## Security
+The Vite dev server runs on `5173` and proxies `/api` and `/media` to the FastAPI backend.
 
+Offline/local instructions are also available in [OFFLINE_SETUP.md](C:/Inventory_managment_tool/Inbound_Inventory/OFFLINE_SETUP.md).
+
+## Production deployment
+
+This repo now includes:
+
+- [backend/Dockerfile](C:/Inventory_managment_tool/Inbound_Inventory/backend/Dockerfile)
+- [frontend/Dockerfile](C:/Inventory_managment_tool/Inbound_Inventory/frontend/Dockerfile)
+- [frontend/nginx.conf](C:/Inventory_managment_tool/Inbound_Inventory/frontend/nginx.conf)
+- [docker-compose.prod.yml](C:/Inventory_managment_tool/Inbound_Inventory/docker-compose.prod.yml)
+
+Deployment instructions are in [DEPLOYMENT.md](C:/Inventory_managment_tool/Inbound_Inventory/DEPLOYMENT.md).
+
+## Security notes
+
+- Set a strong `AUTH_SECRET_KEY` in production.
+- Rotate any old database passwords before deploying.
+- Keep `CORS_ORIGINS` limited to your real frontend domain.
 - Never commit the real `.env` file.
-- Do not commit local database files or uploaded documents.
